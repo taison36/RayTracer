@@ -1,6 +1,7 @@
-#include "Camera.hpp"
-
+#include "Camera.h"
 #include "glm/gtc/matrix_transform.hpp"
+
+namespace rt {
 
 Camera::Camera(const glm::vec3 &position,
                 const glm::vec3 &up,
@@ -36,4 +37,12 @@ float Camera::getZoom() const {
 
 glm::vec3 Camera::getPosition() const {
     return position;
+}
+
+Ray Camera::generateRay(const CameraSample& sample) const {
+    auto origin = glm::vec3(0.0f); // camera at origin in view space
+    auto direction = glm::normalize(glm::vec3(sample.x, sample.y, -1.0f));
+    return {origin, direction};
+}
+
 }

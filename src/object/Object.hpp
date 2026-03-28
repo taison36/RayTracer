@@ -1,6 +1,8 @@
 #pragma once
 #include <expected>
-#include "../Ray.hpp"
+#include "../render/Ray.hpp"
+
+namespace rt {
 
 class Object {
 public:
@@ -8,3 +10,5 @@ public:
     virtual std::expected<float, bool> intersect(const Ray &ray) = 0;
     virtual Color shade(const glm::vec3 &hitPoint, const glm::vec3 &dir) = 0;
 };
+
+}

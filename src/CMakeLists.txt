@@ -1,16 +1,17 @@
 set(Raytracer_SRC
     main.cpp
 
-    object/Model.cpp
-    object/Sphere.cpp
+    render/Renderer.cpp
+    render/Ray.cpp
+    render/BruteForceTraceIntegrator.cpp
+    render/DefaultRayCaster.cpp
 
     Camera.cpp
 
-    Framebuffer.cpp
-    LoaderGltf.cpp
+    FrameBuffer.cpp
 
-    Renderer.cpp
-    Ray.cpp
+    SceneLoader.cpp
+    Scene.cpp
 )
 
 PREPEND(Raytracer_SRC)

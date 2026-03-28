@@ -1,6 +1,7 @@
 #pragma once
 #include "glm/glm.hpp"
-#include "Color.hpp"
+
+namespace rt {
 
 struct Ray {
     glm::vec3 origin;    
@@ -9,3 +10,4 @@ struct Ray {
     Ray(const glm::vec3& origin, const glm::vec3& direction);
 };
 
+} //rt

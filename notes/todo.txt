@@ -1,0 +1,7 @@
+ 1.[ ] To implement a TraceIntegrator a function is needed, to traverse all triangles in the scene.
+
+
+ notes:
+ You can think about a mesh as an object. An object can contain different types of textures and materials. To represent one type of texture and coresponding material we do need some abstraction.
+ The role of this abstraction plays primitive. So an object contains at least of one primitive, but not mandatory. A primitive contains pointers to raw data such as verticies, indicies, normals, texcoordinates. It also points to the material.
+ Material in it's turn has an information about different type of textures, that are needed to render a primitive. So it points to the row data of images, eg. textures.

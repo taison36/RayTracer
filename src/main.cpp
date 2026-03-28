@@ -1,60 +1,51 @@
-#include "Renderer.hpp"
-#include "Framebuffer.hpp"
-#include "object/Object.hpp"
-#include "object/Sphere.hpp"
-
 #include <print>
-#include <vector>
 #include <memory>
 #include <fstream>
 
-#include "LoaderGltf.h"
+#include "SceneLoader.h"
+#include "render/Renderer.h"
+#include "FrameBuffer.h"
+#include "render/BruteForceTraceIntegrator.h"
+#include "render/DefaultRayCaster.h"
 
-constexpr int WIDTH = 640;
-constexpr int HEIGHT = 480;
-constexpr int SPHERE_COUNT = 16;
-
-void generateSpheres(std::vector<std::unique_ptr<Object> > &objects, int count) {
-    int min = -5;
-    int var = 10;
-    for (int i = 0; i < count; i++) {
-        glm::vec3 randPos(min + rand() % var,
-                          min + rand() % var,
-                          min + rand() % var);
-        Color color(rand() % 255,
-                    rand() % 255,
-                    rand() % 255,
-                    255);
-        objects.push_back(std::make_unique<Sphere>(randPos, color, 1));
-    }
-}
+constexpr int WIDTH = 1920;
+constexpr int HEIGHT = 1080;
+constexpr int FOV = 60.0f;
 
 int main() {
-    LoaderGltf loader;
-    loader.load("resources/simple_model/scene.gltf");
+    rt::ScreenSettings screen_settings(WIDTH, HEIGHT, FOV);
+    rt::FrameBuffer fb(WIDTH, HEIGHT);
 
-    Framebuffer fb(WIDTH, HEIGHT);
-    std::vector<std::unique_ptr<Object> > objects;
+    glm::vec3 modelCenter(-24.0f, 18.0f, 11.0f);
+    glm::vec3 cameraPos = modelCenter + glm::vec3(-25.0f, 10.0f, 12.0f); // 10 up, 20 back
+    glm::vec3 dir = glm::normalize(modelCenter - cameraPos); // direction from camera to model
+    float pitch = glm::degrees(asin(dir.y)); // vertical angle
+    float yaw = glm::degrees(atan2(dir.z, dir.x)); // horizontal angle
+    const rt::Camera camera(cameraPos, glm::vec3(0.0f, 1.0f, 0.0f), yaw, pitch, screen_settings.FOV);
+    rt::Scene scene = rt::SceneLoader::loadScene("resources/simple_model/scene.gltf", camera);
+    const rt::Renderer renderer(std::make_unique<rt::DefaultRayCaster>(),
+                                std::make_unique<rt::BruteForceTraceIntegrator>(),
+                                screen_settings);
 
-    generateSpheres(objects, SPHERE_COUNT);
+    auto start = std::chrono::high_resolution_clock::now();
 
-    const auto renderer = std::make_unique<Renderer>(WIDTH, HEIGHT, 90.0f);
-    const Camera camera({0.0f, 0.0f, -5.0f});
+    renderer.render(fb, scene);
 
-    renderer->render(fb, objects, camera);
+    auto end = std::chrono::high_resolution_clock::now();
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+    std::println("Time: {} ms", duration.count());
 
     std::ofstream ofs("./out.ppm");
     ofs << "P6\n" << WIDTH << " " << HEIGHT << "\n255\n";
-    for (auto &row: fb.getPixels()) {
-        for (auto &pixel: row) {
-            unsigned char color[3] = {
-                static_cast<unsigned char>(pixel.r),
-                static_cast<unsigned char>(pixel.g),
-                static_cast<unsigned char>(pixel.b)
-            };
-            ofs.write((char *) color, 3);
-        }
+    for (auto &pixel: fb) {
+        unsigned char color[3] = {
+            static_cast<unsigned char>(pixel.r),
+            static_cast<unsigned char>(pixel.g),
+            static_cast<unsigned char>(pixel.b)
+        };
+        ofs.write((char *) color, 3);
     }
     ofs.close();
-     std::println("end");
 }
