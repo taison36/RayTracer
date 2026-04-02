@@ -10,12 +10,6 @@ class FrameBuffer {
     const int HEIGHT;
 
 public:
-    FrameBuffer(int width, int height);
-
-    const Color* operator[](int desiredHeight) const;
-    Color* operator[](int desiredHeight);
-
-
     class ConstIterator {
         const Color* ptr;
         int index;
@@ -52,6 +46,12 @@ public:
         int col() const;
     };
 
+    FrameBuffer(int width, int height);
+
+    const Color* operator[](int desiredHeight) const;
+    Color* operator[](int desiredHeight);
+
+
     [[nodiscard]] ConstIterator begin() const;
 
     [[nodiscard]] ConstIterator end() const;
@@ -59,6 +59,7 @@ public:
     Iterator begin();
 
     Iterator end();
+
 };
 
 }//rt
