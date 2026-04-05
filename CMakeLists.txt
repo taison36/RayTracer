@@ -80,7 +80,9 @@ set(SHADERS
 
 add_subdirectory(src)
 
-add_executable(Raytracer ${Raytracer_SRC})
+add_executable(Raytracer ${Raytracer_SRC}
+        src/core/RayTracerApplication.h
+        src/core/RayTracerApplication.cpp)
 
 add_custom_command(TARGET Raytracer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory

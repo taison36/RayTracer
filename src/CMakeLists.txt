@@ -1,21 +1,23 @@
 set(Raytracer_SRC
     main.cpp
 
+    core/FrameBuffer.cpp
+    core/RayTracerApplication.cpp
+    core/Scene.cpp
+
+    objects/Camera.cpp
+
+    render/cpu/Ray.cpp
+    render/cpu/BruteForceTraceIntegrator.cpp
+    render/cpu/Renderer.cpp
+
+    render/gpu/BruteForce.cpp
+    render/gpu/Renderer.cpp
+    render/gpu/RendererGPU.cpp
+    render/gpu/VkCore.cpp
+
+    utils/SceneLoader.cpp
     utils/utils.cpp
-    render/Renderer.cpp
-    render/Ray.cpp
-    render/BruteForceTraceIntegrator.cpp
-    render/DefaultRayCaster.cpp
-
-    gpu/RendererGPU.cpp
-
-    Camera.cpp
-
-    FrameBuffer.cpp
-
-    SceneLoader.cpp
-    Scene.cpp
-
 )
 
 PREPEND(Raytracer_SRC)
