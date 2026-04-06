@@ -9,11 +9,11 @@ set(Raytracer_SRC
 
     render/cpu/Ray.cpp
     render/cpu/BruteForceTraceIntegrator.cpp
+    render/cpu/DefaultRayCaster.cpp
     render/cpu/Renderer.cpp
 
     render/gpu/BruteForce.cpp
     render/gpu/Renderer.cpp
-    render/gpu/RendererGPU.cpp
     render/gpu/VkCore.cpp
 
     utils/SceneLoader.cpp

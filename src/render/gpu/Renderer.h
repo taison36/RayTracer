@@ -3,6 +3,7 @@
 #include "../../objects/ScreenSettings.h"
 #include "../../core/FrameBuffer.h"
 #include "../../core/Scene.h"
+#include "VkCore.h"
 #include <memory>
 
 namespace rt::gfx {
@@ -14,10 +15,10 @@ namespace rt::gfx {
         OutputImage outputImage;
 
         void createOutputImage();
-        void saveFoFrameBuffer(const void* data, FrameBuffer& fb) const;
+        void saveToFrameBuffer(void* data, FrameBuffer& fb) const;
     public: 
         Renderer(const ScreenSettings& screenSettings, std::unique_ptr<AccelerationStruct> accelStruct);
-        void run(const Scene& scene, FrameBuffer& fb) const;
+        void run(const Scene& scene, FrameBuffer& fb) ;
     };
 
 }// rt::gxf

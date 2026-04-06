@@ -9,15 +9,15 @@ namespace rt::gfx {
         createPipeline(vkCore);
     }
 
-    void BruteForce::record(const vk::CommandBuffer& cmb) {
+    void BruteForce::record(const vk::CommandBuffer& cmb, const uint32_t WIDTH, const uint32_t HEIGHT) {
         cmb.bindPipeline(vk::PipelineBindPoint::eCompute, *pipeline);
         cmb.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
                                pipelineLayout,
                                0,
                                {*descriptorSets.front()}, 
                                nullptr);
-        cmb.dispatch((screenSettings.WIDTH + 15)  / 16,
-                     (screenSettings.HEIGHT + 15) / 16,
+        cmb.dispatch((WIDTH  + 15)  / 16,
+                     (HEIGHT + 15) / 16,
                      1);
     }
 

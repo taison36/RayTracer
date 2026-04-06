@@ -1,6 +1,7 @@
 #pragma once
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include"VkCore.h"
+#include "../../objects/ScreenSettings.h"
 #include <vulkan/vulkan_raii.hpp>
 
 namespace rt::gfx {
@@ -37,7 +38,7 @@ namespace rt::gfx {
         std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands() const;
         void endSingleTimeCommands(vk::raii::CommandBuffer &commandBuffer) const;
         void transitionImageLayout(const vk::raii::Image &image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) const;
-        void copyImageToBuffer(const vk::raii::Image &image, vk::raii::Buffer &buffer) const;
+        void copyImageToBuffer(const vk::raii::Image &image, vk::raii::Buffer &buffer, const uint32_t HEIGHT, const uint32_t WIDTH) const;
         void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
                           vk::raii::Buffer &buffer, vk::raii::DeviceMemory &bufferMemory) const;
         [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;

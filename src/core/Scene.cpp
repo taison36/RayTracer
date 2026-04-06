@@ -62,11 +62,15 @@ namespace rt {
         return index != other.index;
     }
     
-    Scene::Scene(const std::vector<TrianglePrimitive> &trianglePrimitives)
-        : trianglePrimitives(trianglePrimitives){
+    Scene::Scene(const std::vector<TrianglePrimitive>& trianglePrimitives, const Camera& camera)
+        : trianglePrimitives(trianglePrimitives), camera(camera) {
     }
     
     const std::vector<TrianglePrimitive>& Scene::getTrianglePrimitives() const {
         return trianglePrimitives;
+    }
+
+    const Camera& Scene::getCamera() const {
+        return camera;
     }
 } // rt

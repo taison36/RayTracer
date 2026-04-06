@@ -18,7 +18,7 @@ int main() {
     const rt::Camera camera(cameraPos, glm::vec3(0.0f, 1.0f, 0.0f), yaw, pitch, screenSettings.FOV);
     rt::Scene scene = rt::SceneLoader::loadScene("resources/simple_model/scene.gltf", camera);
 
-    rt::RayTracerApplication app(screenSettings, std::move(std::make_unique(rt::gfx::BruteForce())));
+    rt::RayTracerApplication app(screenSettings, std::make_unique<rt::gfx::BruteForce>());
 
-    app.run(Scene);
+    app.run(scene);
 }

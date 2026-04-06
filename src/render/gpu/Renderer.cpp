@@ -9,11 +9,11 @@ namespace rt::gfx {
         createOutputImage();
     };
 
-    void Renderer::run(const Scene& scene, FrameBuffer& fb) const {
+    void Renderer::run(const Scene& scene, FrameBuffer& fb) {
         const auto cmd = vkCore.beginSingleTimeCommands();
 
         accelStruct->build(vkCore, scene, outputImage); 
-        accelStruct->record(*cmd); 
+        accelStruct->record(*cmd, screenSettings.WIDTH, screenSettings.HEIGHT); 
 
         vkCore.endSingleTimeCommands(*cmd);
 
@@ -22,25 +22,24 @@ namespace rt::gfx {
         vk::raii::DeviceMemory stagingBufferMemory({});
         vkCore.createBuffer(imageSize, vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, stagingBuffer, stagingBufferMemory);
         vkCore.transitionImageLayout(outputImage.image, vk::ImageLayout::eGeneral , vk::ImageLayout::eTransferSrcOptimal);
-        vkCore.copyImageToBuffer(outputImage.image, stagingBuffer);
+        vkCore.copyImageToBuffer(outputImage.image, stagingBuffer, screenSettings.HEIGHT, screenSettings.WIDTH);
     
         void* data = stagingBufferMemory.mapMemory(0, imageSize);
-        saveToFramBuffer("out.ppm", data, screenSettings.WIDTH, screenSettings.HEIGHT);
+        saveToFrameBuffer(data, fb);
         stagingBufferMemory.unmapMemory();
-
     }
 
-    void Renderer::saveFoFrameBuffer(const void* data, FrameBuffer& fb) const {
+    void Renderer::saveToFrameBuffer(void* data, FrameBuffer& fb) const {
+        const uint8_t* pixels = reinterpret_cast<const uint8_t*>(data);
 
-        // Write RGB only, skip alpha
         for (uint32_t i = 0; i < screenSettings.WIDTH * screenSettings.HEIGHT; ++i) {
-            file.put(pixels[i * 4 + 0]); // R
-            file.put(pixels[i * 4 + 1]); // G
-            file.put(pixels[i * 4 + 2]); // B
-            file.put(pixels[i * 4 + 3]); // A
+            Color c(pixels[i * 4 + 0], // R
+                    pixels[i * 4 + 1], // G
+                    pixels[i * 4 + 2], // B
+                    pixels[i * 4 + 3]  // A
+            );
+            fb[i / screenSettings.WIDTH][i % screenSettings.WIDTH] = c;
         }
-    
-
     }
 
     void Renderer::createOutputImage() {

@@ -13,6 +13,7 @@ namespace rt::gfx {
         setupDebugMessenger();
         pickPhysicalDevice();
         createLogicalDevice();
+        createCommandPool();
     }
 
     void VkCore::createInstance() {
@@ -209,6 +210,46 @@ namespace rt::gfx {
         commandBuffer->pipelineBarrier2(dependencyInfo);
     	endSingleTimeCommands(*commandBuffer);
     }
+
+    void VkCore::copyImageToBuffer(const vk::raii::Image &image, vk::raii::Buffer &buffer, const uint32_t HEIGHT, const uint32_t WIDTH) const {
+    	const auto singleTimeCommandBuffer = beginSingleTimeCommands();
+        vk::ImageSubresourceLayers imageSubresourceLayersInfo{.aspectMask = vk::ImageAspectFlagBits::eColor,
+                                                              .baseArrayLayer = 0,
+                                                              .layerCount = 1,
+                                                              .mipLevel = 0
+        };
+        vk::BufferImageCopy2 bufferImageCopyInfo{.bufferOffset = 0,
+                                                 .bufferImageHeight = 0,
+                                                 .bufferRowLength = 0,
+                                                 .imageSubresource = imageSubresourceLayersInfo,
+                                                 .imageExtent = {WIDTH, HEIGHT, 1},
+                                                 .imageOffset = {0, 0, 0}
+        };
+        vk::CopyImageToBufferInfo2 copyImageToBufferInfo{.srcImage = image,
+                                                         .srcImageLayout = vk::ImageLayout::eTransferSrcOptimal,
+                                                         .dstBuffer = buffer,
+                                                         .pRegions = &bufferImageCopyInfo,
+                                                         .regionCount = 1
+        };
+        singleTimeCommandBuffer->copyImageToBuffer2(copyImageToBufferInfo);
+        endSingleTimeCommands(*singleTimeCommandBuffer);
+    }
+    
+    void VkCore::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
+                                   vk::raii::Buffer &buffer, vk::raii::DeviceMemory &bufferMemory) const {
+    	vk::BufferCreateInfo bufferInfo{.size = size,
+                                        .usage = usage,
+                                        .sharingMode = vk::SharingMode::eExclusive
+        };
+    	buffer = vk::raii::Buffer(device, bufferInfo);
+    	vk::MemoryRequirements memRequirements = buffer.getMemoryRequirements();
+    	vk::MemoryAllocateInfo allocInfo{.allocationSize = memRequirements.size,
+                                         .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties)
+        };
+    	bufferMemory = vk::raii::DeviceMemory(device, allocInfo);
+    	buffer.bindMemory(bufferMemory, 0);
+    }
+    
 
     const vk::raii::Device& VkCore::getDevice() const {
         return device;
