@@ -1,7 +1,5 @@
 #pragma once
-#include "CameraSample.h"
 #include "glm/glm.hpp"
-#include "../render/cpu/Ray.h"
 
 namespace rt {
 
@@ -33,7 +31,7 @@ namespace rt {
         [[nodiscard]] glm::mat4 getView() const;
         [[nodiscard]] float getZoom() const;
         [[nodiscard]] glm::vec3 getPosition() const;
-        [[nodiscard]] cpu::Ray generateRay(const CameraSample& sample) const;
+        [[nodiscard]] glm::mat4 getProjection(float aspectRatio) const;
     };
     
     }//rt

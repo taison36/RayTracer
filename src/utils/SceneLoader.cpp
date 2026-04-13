@@ -1,3 +1,4 @@
+#include <cstdint>
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -183,7 +184,7 @@ namespace rt {
     std::vector<T> readAccessorScalar(const tinygltf::Model &model,
                                       const tinygltf::Accessor &accessor) {
         const auto &bufferView = model.bufferViews[accessor.bufferView];
-        const auto &buffer = model.buffers[bufferView.buffer];
+        const auto &buffer     = model.buffers[bufferView.buffer];
 
         const unsigned char *basePtr =
                 buffer.data.data() + bufferView.byteOffset + accessor.byteOffset;
@@ -203,49 +204,114 @@ namespace rt {
         return result;
     }
 
-    std::vector<uint32_t> readPrimitiveIndices(const tinygltf::Primitive &tinyPrimitive,
-                                               const tinygltf::Model &tinyModel) {
+    std::vector<Triangle> readPrimitiveIndices(const tinygltf::Primitive &tinyPrimitive, const tinygltf::Model &tinyModel, uint32_t offsetIndexBegin) {
+        std::vector<Triangle> triangles;
         const auto &tinyAccessor = tinyModel.accessors[tinyPrimitive.indices];
-        std::vector<uint32_t> indices;
 
         switch (tinyAccessor.componentType) {
             case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
-                auto bytes = readAccessorScalar<uint8_t>(tinyModel, tinyAccessor);
-                indices.resize(bytes.size());
-                std::ranges::transform(bytes, indices.begin(),
-                                       [](const uint8_t b) { return static_cast<uint32_t>(b); });
+                const auto bytes = readAccessorScalar<uint8_t>(tinyModel, tinyAccessor);
+                for (size_t i = 0; i < bytes.size(); i += 3) {
+                    triangles.emplace_back(
+                        std::array{
+                            offsetIndexBegin + static_cast<uint32_t>(bytes[i]),
+                            offsetIndexBegin + static_cast<uint32_t>(bytes[i + 1]),
+                            offsetIndexBegin + static_cast<uint32_t>(bytes[i + 2])
+                        },
+                        tinyPrimitive.material
+                    );
+                }
+
                 break;
             }
             case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
-                auto shorts = readAccessorScalar<uint16_t>(tinyModel, tinyAccessor);
-                indices.resize(shorts.size());
-                std::ranges::transform(shorts, indices.begin(),
-                                       [](const uint16_t s) { return static_cast<uint32_t>(s); });
+                const auto shorts = readAccessorScalar<uint16_t>(tinyModel, tinyAccessor);
+                for (size_t i = 0; i < shorts.size(); i += 3) {
+                    triangles.emplace_back(
+                        std::array{
+                            offsetIndexBegin + static_cast<uint32_t>(shorts[i]),
+                            offsetIndexBegin + static_cast<uint32_t>(shorts[i + 1]),
+                            offsetIndexBegin + static_cast<uint32_t>(shorts[i + 2])
+                        },
+                        tinyPrimitive.material
+                    );
+                }
                 break;
             }
             case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: {
-                indices = readAccessorScalar<uint32_t>(tinyModel, tinyAccessor);
+                const auto indices = readAccessorScalar<uint32_t>(tinyModel, tinyAccessor);
+                for (size_t i = 0; i < indices.size(); i += 3) {
+                    triangles.emplace_back(
+                        std::array{
+                            offsetIndexBegin + indices[i],
+                            offsetIndexBegin + indices[i + 1],
+                            offsetIndexBegin + indices[i + 2]
+                        },
+                        tinyPrimitive.material
+                    );
+                }
                 break;
             }
             default:
                 throw std::runtime_error("[ERROR] unexpected accessor basis data type for indices");
         }
 
-        return indices;
+        return triangles;
     }
 
-    TrianglePrimitive convertTrianglePrimitive(const tinygltf::Primitive &tinyPrimitive,
-                                               const tinygltf::Model &tinyModel, const glm::mat4 &worldMatrix) {
+    std::vector<glm::vec3> buildNormals( const std::vector<Triangle>& triangles, const std::vector<glm::vec3>& positions) {
+        std::vector<glm::vec3> normals(positions.size(), glm::vec3(0.0f));
+    
+        for (const Triangle& tri : triangles) {
+            uint32_t i0 = tri.indices[0];
+            uint32_t i1 = tri.indices[1];
+            uint32_t i2 = tri.indices[2];
+    
+            glm::vec3 p0 = positions[i0];
+            glm::vec3 p1 = positions[i1];
+            glm::vec3 p2 = positions[i2];
+    
+            glm::vec3 e1 = p1 - p0;
+            glm::vec3 e2 = p2 - p0;
+    
+            glm::vec3 faceNormal = glm::cross(e1, e2);
+    
+            if (glm::length(faceNormal) < 1e-8f)
+                continue;
+    
+            normals[i0] += faceNormal;
+            normals[i1] += faceNormal;
+            normals[i2] += faceNormal;
+        }
+    
+        for (auto& n : normals) {
+            if (glm::length(n) > 1e-8f)
+                n = glm::normalize(n);
+            else
+                n = glm::vec3(0, 1, 0); // fallback
+        }
+    
+        return normals;
+    }
+
+    void convertTrianglePrimitive(const tinygltf::Primitive &tinyPrimitive, const tinygltf::Model &tinyModel,
+                                  const glm::mat4 &worldMatrix, std::vector<Vertex> &vertices,
+                                  std::vector<Triangle> &triangles) {
         if (tinyPrimitive.mode != TINYGLTF_MODE_TRIANGLES) {
             throw std::runtime_error("[ERROR] Only triangle primitives are supported");
         }
-
-        //TODO apply worldMatrix and not just store it
-        std::vector<uint32_t> indices = readPrimitiveIndices(tinyPrimitive, tinyModel);
+        uint32_t indexOffset = vertices.size();
+        // need to shift indeces because they are zero-based and vertices can have already some data
+        std::vector<Triangle>  newTriangles = readPrimitiveIndices(tinyPrimitive, tinyModel, indexOffset);
+        triangles.insert(
+            triangles.end(),
+            newTriangles.begin(),
+            newTriangles.end()
+        );
         std::vector<glm::vec3> positions;
         std::vector<glm::vec3> normals;
         std::vector<glm::vec4> tangents;
-        std::vector<std::vector<glm::vec2> > textCoordinates;
+        std::array<std::vector<glm::vec2>, RT_MAXSIZE_NUM_TEXCOORD> textCoordinates;
 
         for (auto &[attributeKey, accessorIndex]: tinyPrimitive.attributes) {
             if (attributeKey == "POSITION") {
@@ -279,56 +345,214 @@ namespace rt {
 
                 std::string indexStr = attributeKey.substr(pos + startStr.size());
 
-                const int texCoordIndex = std::stoi(indexStr);
-                if (textCoordinates.size() <= texCoordIndex) textCoordinates.resize(texCoordIndex + 1);
+                const size_t texCoordIndex = std::stoi(indexStr);
+
+                if (texCoordIndex >= RT_MAXSIZE_NUM_TEXCOORD) {
+                    std::println("[ERROR] max TEXCOORD_N was exceeded, TEXCOORD_{}, although max size is: {}",
+                                 texCoordIndex, RT_MAXSIZE_NUM_TEXCOORD);
+                    throw std::runtime_error("[ERROR] max TEXCOORD_N was exceeded");
+                }
+
                 textCoordinates[texCoordIndex] = readAccessorVec<2, float>(
                     tinyModel, tinyModel.accessors[accessorIndex]);
             }
         }
 
-        // Sanity check
-        for (const auto idx: indices) {
-            if (idx >= positions.size()) {
-                throw std::runtime_error("[ERROR] index out of bounds in primitive: " + std::to_string(idx));
-            }
-        }
+        assert(!positions.empty());
+        if (normals.empty()) normals = buildNormals(newTriangles, positions);
 
-        //convert position into world spac
-        for (auto& pos : positions) {
-            pos = glm::vec3(worldMatrix * glm::vec4(pos, 1.0f));
+        for (size_t i = 0; i < positions.size(); ++i) {
+            Vertex v;
+            positions[i] = glm::vec3(worldMatrix * glm::vec4(positions[i], 1.0f));
+            v.position = positions[i];
+            v.normal   = normals[i];
+            v.tangent  = tangents.empty() ? glm::vec4(0.0f) : tangents[i];
+            for (int j = 0; j < RT_MAXSIZE_NUM_TEXCOORD; ++j) {
+                if (textCoordinates[j].empty()) {
+                    continue;
+                }
+                v.texCoord[j] = textCoordinates[j][i];
+            }
+
+            vertices.push_back(v);
         }
-        return {indices, positions, normals, tangents, textCoordinates};
     }
 
-    void dfsNode(const tinygltf::Model &tinyModel, std::vector<TrianglePrimitive> &primitives,
+
+    void dfsNode(const tinygltf::Model &tinyModel, std::vector<Vertex> &vertices, std::vector<Triangle> &triangles,
                  const tinygltf::Node &tinyNode, const glm::mat4 &parentWorldMatrix) {
         const auto worldMatrix = parentWorldMatrix * extractTransformMatrix(tinyNode);
 
         if (tinyNode.mesh != -1) {
             for (auto &tinyPrimitive: tinyModel.meshes[tinyNode.mesh].primitives) {
-                primitives.push_back(convertTrianglePrimitive(tinyPrimitive, tinyModel, worldMatrix));
+                convertTrianglePrimitive(tinyPrimitive, tinyModel, worldMatrix, vertices, triangles);
             }
         }
 
         for (const int child: tinyNode.children) {
-            dfsNode(tinyModel, primitives, tinyModel.nodes[child], worldMatrix);
+            dfsNode(tinyModel, vertices, triangles, tinyModel.nodes[child], worldMatrix);
         }
     }
 
+    Material convertMaterial(const tinygltf::Material &tm) {
+        Material material;
+
+        material.emissiveFactor = glm::vec3(
+            static_cast<float>(tm.emissiveFactor[0]),
+            static_cast<float>(tm.emissiveFactor[1]),
+            static_cast<float>(tm.emissiveFactor[2])
+        );
+
+        const auto &pbr = tm.pbrMetallicRoughness;
+
+        PbrMetallicRoughness pbrMetallicRoughness = {
+            .baseColorFactor{
+                static_cast<float>(pbr.baseColorFactor[0]),
+                static_cast<float>(pbr.baseColorFactor[1]),
+                static_cast<float>(pbr.baseColorFactor[2]),
+                0.0f
+            },
+            .baseColorTexture = {
+                .index = pbr.baseColorTexture.index,
+                .texCoord = pbr.baseColorTexture.texCoord
+            },
+            .metallicFactor = static_cast<float>(pbr.metallicFactor),
+            .roughnessFactor = static_cast<float>(pbr.roughnessFactor),
+            .metallicRoughnessTexture = {
+                .index = pbr.metallicRoughnessTexture.index,
+                .texCoord = pbr.metallicRoughnessTexture.texCoord
+            }
+        };
+        material.pbrMetallicRoughness = pbrMetallicRoughness;
+
+        return material;
+    }
+
+    Texture convertTexture(const tinygltf::Model &tinyModel, const tinygltf::Texture &tinyTexture) {
+        int width, height, channels;
+        const auto &tinyImage = tinyModel.images[tinyTexture.source];
+
+        unsigned char *rawData = stbi_load(("resources/simple_model/" + tinyImage.uri).c_str(), &width, &height,
+                                           &channels, 4);
+
+        assert(width == tinyImage.width);
+        assert(height == tinyImage.height);
+
+        if (!rawData) {
+            std::println("[ERROR] Could not load the file {}", tinyImage.uri);
+            throw std::runtime_error("[ERROR] Could not load the file");
+        }
+
+        size_t dataSize = static_cast<size_t>(width) * height * 4;
+
+        std::vector<uint8_t> data(rawData, rawData + dataSize);
+
+        stbi_image_free(rawData);
+
+        const tinygltf::Sampler &tinySampler = tinyModel.samplers[tinyTexture.sampler];
+
+        Filter minFilter = Filter::NEAREST;
+        Filter mipmapMode = Filter::NEAREST;
+        Filter magFilter = Filter::NEAREST;
+
+        switch (tinySampler.minFilter) {
+            case TINYGLTF_TEXTURE_FILTER_NEAREST:
+            case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST:
+                minFilter = Filter::NEAREST;
+                mipmapMode = Filter::NEAREST;
+                break;
+            case TINYGLTF_TEXTURE_FILTER_LINEAR:
+            case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
+                minFilter = Filter::LINEAR;
+                mipmapMode = Filter::LINEAR;
+                break;
+            case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST:
+                minFilter = Filter::LINEAR;
+                mipmapMode = Filter::NEAREST;
+                break;
+            case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR:
+                minFilter = Filter::NEAREST;
+                mipmapMode = Filter::LINEAR;
+                break;
+            default:
+                std::println("[WARN] tinySampler.minFilter is not set. Using default");
+                break;
+        }
+
+        switch (tinySampler.magFilter) {
+            case TINYGLTF_TEXTURE_FILTER_NEAREST:
+                magFilter = Filter::NEAREST;
+                break;
+            case TINYGLTF_TEXTURE_FILTER_LINEAR:
+                magFilter = Filter::LINEAR;
+                break;
+            default:
+                std::println("[WARN] tinySampler.magFilter is not set. Using default");
+                break;
+        }
+
+        WrapMode wrapU{WrapMode::REPEAT};
+        WrapMode wrapV{WrapMode::REPEAT};
+
+        switch (tinySampler.wrapS) {
+            case TINYGLTF_TEXTURE_WRAP_REPEAT:
+                wrapU = WrapMode::REPEAT;
+                break;
+            case TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE:
+                wrapU = WrapMode::CLAMP_TO_EDGE;
+                break;
+            case TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT:
+                wrapU = WrapMode::MIRRORED_REPEAT;
+            default:
+                std::println("[WARN] tinySampler.wrapS is not set. Using default");
+                break;
+        }
+
+        switch (tinySampler.wrapT) {
+            case TINYGLTF_TEXTURE_WRAP_REPEAT:
+                wrapV = WrapMode::REPEAT;
+                break;
+            case TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE:
+                wrapV = WrapMode::CLAMP_TO_EDGE;
+                break;
+            case TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT:
+                wrapV = WrapMode::MIRRORED_REPEAT;
+            default:
+                std::println("[WARN] tinySampler.wrapT is not set. Using default");
+                break;
+        }
+
+        return {
+            static_cast<uint32_t>(width), static_cast<uint32_t>(height), data, minFilter, magFilter, mipmapMode, wrapU,
+            wrapV
+        };
+    }
 
     Scene SceneLoader::loadScene(const std::string &path, const Camera &camera) {
         auto tinyModel = getGLTFModel(path);
         constexpr float SCALE = 0.01f;
         glm::mat4 worldMatrix{1.0f};
         worldMatrix = glm::scale(worldMatrix, glm::vec3(SCALE));
+        worldMatrix = camera.getView() * worldMatrix;
+        // TODO If i will do online rendering -> move cameraView multiplication into separate compute pipieline step
 
-        std::vector<TrianglePrimitive> primitives;
+        std::vector<Vertex> vertices;
+        std::vector<Triangle> triangles;
         int defaultScene = tinyModel.defaultScene != -1 ? tinyModel.defaultScene : 0;
         for (const auto &tinyScene = tinyModel.scenes[defaultScene]; int rootNodeIndex: tinyScene.nodes) {
-            dfsNode(tinyModel, primitives, tinyModel.nodes[rootNodeIndex], worldMatrix);
+            dfsNode(tinyModel, vertices, triangles, tinyModel.nodes[rootNodeIndex], worldMatrix);
         }
 
-        Scene scene(primitives, camera);
-        return scene;
+        std::vector<Material> materials;
+        for (const auto &tinyMaterial: tinyModel.materials) {
+            materials.push_back(convertMaterial(tinyMaterial));
+        }
+
+        std::vector<Texture> textures;
+        for (const auto &tinyTexture: tinyModel.textures) {
+            textures.push_back(convertTexture(tinyModel, tinyTexture));
+        }
+
+        return {vertices, triangles, materials, textures};
     }
 } //rt

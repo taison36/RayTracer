@@ -7,14 +7,10 @@ set(Raytracer_SRC
 
     objects/Camera.cpp
 
-    render/cpu/Ray.cpp
-    render/cpu/BruteForceTraceIntegrator.cpp
-    render/cpu/DefaultRayCaster.cpp
-    render/cpu/Renderer.cpp
-
-    render/gpu/BruteForce.cpp
+        render/gpu/Checker.cpp
     render/gpu/Renderer.cpp
     render/gpu/VkCore.cpp
+    render/gpu/BruteForce.cpp
 
     utils/SceneLoader.cpp
     utils/utils.cpp

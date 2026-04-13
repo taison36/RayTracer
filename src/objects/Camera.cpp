@@ -38,11 +38,13 @@ namespace rt {
     glm::vec3 Camera::getPosition() const {
         return position;
     }
-    
-    cpu::Ray Camera::generateRay(const CameraSample& sample) const {
-        auto origin = glm::vec3(0.0f); // camera at origin in view space
-        auto direction = glm::normalize(glm::vec3(sample.x, sample.y, -1.0f));
-        return {origin, direction};
-    }
 
+    glm::mat4 Camera::getProjection(float aspectRatio) const {
+        float fov  = glm::radians(zoom);
+        float near = 0.1f;
+        float far  = 100.0f;
+        glm::mat4 proj = glm::perspective(fov, aspectRatio, near, far);
+        proj[1][1] *= -1;
+        return proj;
+    }
 }

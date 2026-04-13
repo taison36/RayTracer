@@ -1,18 +1,35 @@
 #include "RayTracerApplication.h"
+#include "../utils/SceneLoader.h"
+#include "../objects/UtilObjects.h"
+#include "FrameBuffer.h"
 
 #include <chrono>
 #include <print>
 #include <fstream>
 
 namespace rt {
-    RayTracerApplication::RayTracerApplication(const ScreenSettings& ss, std::unique_ptr<gfx::AccelerationStruct> accelStruct)
-        : ss(ss), fb(ss.WIDTH, ss.HEIGHT), renderer(ss, std::move(accelStruct)) {
+    RayTracerApplication::RayTracerApplication(const std::string& scenePath, std::unique_ptr<gfx::AccelerationStruct> accelStruct)
+        : screenSettings(std::make_unique<ScreenSettings>(WIDTH, HEIGHT, FOV)),
+          buffer(std::make_unique<FrameBuffer>(WIDTH, HEIGHT)),
+          renderer(std::make_unique<gfx::Renderer>(std::move(accelStruct))) {
+
+       // glm::vec3 modelCenter(-24.0f, 18.0f, 11.0f);
+        glm::vec3 modelCenter(0.0f, 0.0f, 0.0f);
+        glm::vec3 cameraPos = modelCenter + glm::vec3(-3.0f, 7.0f, 18.0f);
+        glm::vec3 dir = glm::normalize(modelCenter - cameraPos); // direction from camera to model
+        float pitch = glm::degrees(asin(dir.y)); // vertical angle
+        float yaw = glm::degrees(atan2(dir.z, dir.x)); // horizontal angle
+
+        camera = std::make_unique<Camera>(cameraPos, glm::vec3(0.0f, 1.0f, 0.0f), yaw, pitch, screenSettings->FOV);
+        scene = std::make_unique<Scene>(SceneLoader::loadScene(scenePath, *camera));
     }
-        
-    void RayTracerApplication::run(const Scene& scene) {
+
+    void RayTracerApplication::run() {
+        gfx::RendererContext context(&*scene, &*camera, &*screenSettings);
+
         auto start = std::chrono::high_resolution_clock::now();
 
-        renderer.run(scene, fb); 
+        renderer->run(context, *buffer);
 
         std::println("[INFO] RendererGPU has finished Time: {} ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start).count());
 
@@ -27,11 +44,11 @@ namespace rt {
     
         // PPM header (P6 = binary RGB)
         file << "P6\n";
-        file << ss.WIDTH << " " << ss.HEIGHT << "\n";
+        file << screenSettings->WIDTH << " " << screenSettings->HEIGHT << "\n";
         file << "255\n";
     
         // Write RGB only, skip alpha
-        for (auto it = fb.begin(); it != fb.end(); ++it) {
+        for (auto it = buffer->begin(); it != buffer->end(); ++it) {
             file.put((*it).r);
             file.put((*it).g);
             file.put((*it).b);

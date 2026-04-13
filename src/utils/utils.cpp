@@ -20,4 +20,7 @@ std::vector<char> readFile(const std::string& filename) {
     return buffer;
 }
 
+uint32_t align(uint32_t value, uint32_t alignment) {
+    return (value + alignment - 1) & ~(alignment - 1);
+}
 }//rt

@@ -3,17 +3,18 @@
 namespace rt {
 
     FrameBuffer::FrameBuffer(int width, int height)
-        : pixels(height * width), WIDTH(width), HEIGHT(height) {}
+        : pixels(height * width), COLS(width), ROWS(height) {
+    }
     
     const Color* FrameBuffer::operator[](int desiredHeight) const {
-        return &pixels[desiredHeight * WIDTH];
+        return &pixels[desiredHeight * COLS];
     }
     
     Color* FrameBuffer::operator[](int desiredHeight) {
-        return &pixels[desiredHeight * WIDTH];
+        return &pixels[desiredHeight * COLS];
     }
     
-    FrameBuffer::ConstIterator::ConstIterator(const Color * dataPointer, size_t startIndex, int columns)
+    FrameBuffer::ConstIterator::ConstIterator(const Color * dataPointer, size_t startIndex, uint32_t columns)
         : ptr(dataPointer),
           index(startIndex),
           cols(columns) {}
@@ -38,7 +39,7 @@ namespace rt {
         return index % cols;
     }
     
-    FrameBuffer::Iterator::Iterator(Color* dataPointer, size_t startIndex, int columns)
+    FrameBuffer::Iterator::Iterator(Color* dataPointer, size_t startIndex, uint32_t columns)
         : ptr(dataPointer),
           index(startIndex),
           cols(columns) {}
@@ -65,19 +66,19 @@ namespace rt {
     }
     
     FrameBuffer::ConstIterator FrameBuffer::begin() const {
-        return {pixels.data(), 0, HEIGHT};
+        return {pixels.data(), 0, ROWS};
     }
     
     FrameBuffer::ConstIterator FrameBuffer::end() const {
-        return {pixels.data(), pixels.size(), HEIGHT};
+        return {pixels.data(), pixels.size(), ROWS};
     }
     
     FrameBuffer::Iterator FrameBuffer::begin() {
-        return {pixels.data(), 0, HEIGHT};
+        return {pixels.data(), 0, ROWS};
     }
     
     FrameBuffer::Iterator FrameBuffer::end() {
-        return {pixels.data(), pixels.size(), HEIGHT};
+        return {pixels.data(), pixels.size(), ROWS};
     }
 
 } //rt

@@ -1,7 +1,8 @@
 #pragma once
+#include <cstdint>
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include"VkCore.h"
-#include "../../objects/ScreenSettings.h"
+#include "../../objects/UtilObjects.h"
 #include <vulkan/vulkan_raii.hpp>
 
 namespace rt::gfx {
@@ -37,13 +38,19 @@ namespace rt::gfx {
         VkCore();
         std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands() const;
         void endSingleTimeCommands(vk::raii::CommandBuffer &commandBuffer) const;
-        void transitionImageLayout(const vk::raii::Image &image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) const;
-        void copyImageToBuffer(const vk::raii::Image &image, vk::raii::Buffer &buffer, const uint32_t HEIGHT, const uint32_t WIDTH) const;
+        void transitionImageLayout(const vk::raii::Image &image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, const vk::CommandBuffer& commandBuffer) const;
+
+        void copyBufferToImage(const vk::raii::Image &image, const vk::raii::Buffer &buffer, uint32_t HEIGHT, uint32_t WIDTH, uint32_t offset, const vk::CommandBuffer& commandBuffer) const;
+        void copyImageToBuffer(const vk::raii::Image &image, vk::raii::Buffer &buffer, uint32_t HEIGHT, uint32_t WIDTH) const;
+
+        void fillBuffer(const vk::raii::Buffer& srcBuffer, const vk::raii::Buffer& dstBuffer, size_t size, uint32_t offset, const vk::raii::CommandBuffer& commandBuffer) const;
         void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
                           vk::raii::Buffer &buffer, vk::raii::DeviceMemory &bufferMemory) const;
         [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
         [[nodiscard]] vk::raii::ShaderModule createShaderModule(const std::vector<char>& code) const;
-        [[nodiscard]] const vk::raii::Device& getDevice() const;
+        [[nodiscard]] const vk::raii::Device&         getDevice() const;
+        [[nodiscard]] const vk::raii::PhysicalDevice& getPhysicalDevice() const;
+        [[nodiscard]] uint32_t getQueueFamilyIndex() const;
     };
 
 } //rt::gfx

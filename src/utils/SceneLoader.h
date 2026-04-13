@@ -4,7 +4,7 @@
 namespace rt {
 class SceneLoader {
 public:
-    [[nodiscard]] static  Scene loadScene(const std::string &path, const Camera& camera) ;
+    [[nodiscard]] static Scene loadScene(const std::string &path, const Camera& camera) ;
 };
 
 }//rt

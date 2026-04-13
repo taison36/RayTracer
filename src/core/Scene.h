@@ -1,55 +1,88 @@
 #pragma once
+#include "../objects/Camera.h"
 #include <cstdint>
 #include <vector>
 #include <glm/glm.hpp>
 
-#include "../objects/Camera.h"
-
 namespace rt {
 
-    class TrianglePrimitive {
-        std::vector<uint32_t> indices;
-        std::vector<glm::vec3> positions;
-        std::vector<glm::vec3> normals;
-        std::vector<glm::vec4> tangents;
-        std::vector<std::vector<glm::vec2>> textCoordinates;
-    public:
-        class ConstIterator {
-            const TrianglePrimitive* primitives;
-            size_t index;
+#define RT_MAXSIZE_NUM_TEXCOORD 16
 
-        public:
-            ConstIterator(const TrianglePrimitive* primitives, size_t startIndex);
-            std::array<const glm::vec3*, 3> operator*() const;
-            [[nodiscard]] std::array<glm::vec3, 3> position(const glm::mat4& viewMatrix) const;
-            [[nodiscard]] std::array<const glm::vec3*, 3> normal(const glm::mat4& worldMatrix) const;
-            [[nodiscard]] std::array<const glm::vec4*, 4> tangent(const glm::mat4& worldMatrix) const;
-            ConstIterator& operator++();
-            bool operator!=(const ConstIterator& other) const;
-        };
+    struct alignas(16) Vertex {
+        glm::vec3 position{};
+        glm::vec3 normal{}; 
+        glm::vec4 tangent{};
+        std::array<glm::vec2, RT_MAXSIZE_NUM_TEXCOORD> texCoord{};
 
-        TrianglePrimitive(const std::vector<uint32_t>  &indices,
-                          const std::vector<glm::vec3> &positions,
-                          const std::vector<glm::vec3> &normals,
-                          const std::vector<glm::vec4> &tangents,
-                          const std::vector<std::vector<glm::vec2>> &text_coordinates);
-        [[nodiscard]] ConstIterator begin() const;
-        [[nodiscard]] ConstIterator end() const;
+        Vertex() = default;
+        Vertex(const glm::vec3& position,
+               const glm::vec3& normal,
+               const glm::vec4& tangent,
+               const std::array<glm::vec2, RT_MAXSIZE_NUM_TEXCOORD>& texCoord);
     };
 
-    struct Material {
+    struct alignas(16) Triangle {
+        std::array<uint32_t, 3> indices;
+        uint32_t material;
 
+        Triangle(const std::array<uint32_t, 3>& indices, uint32_t material);
     };
 
-    class Scene {
-        const std::vector<TrianglePrimitive> trianglePrimitives;
+    struct alignas(8) TextureInfo {
+      int index{-1};
+      int texCoord{0}; // The set index of texture's TEXCOORD attribute used for
+    };
+
+    struct alignas(16) PbrMetallicRoughness
+    {
+        glm::vec4   baseColorFactor;
+        TextureInfo baseColorTexture;
+        int32_t     _pad0[2]; // pad to 16 bytes
+        float      metallicFactor{1.0};
+        float      roughnessFactor{1.0};
+        int32_t    _pad1[2]; // pad to 16 bytes
+        TextureInfo metallicRoughnessTexture;
+        int32_t _pad2[2]; // pad final 16-byte boundary
+    };
+
+    struct alignas(16) Material {
+        glm::vec3 emissiveFactor;
+        float _pad0;
+        PbrMetallicRoughness pbrMetallicRoughness;
+    };
+
+    enum class Filter {
+        NEAREST,
+        LINEAR,
+    };
+
+    enum class WrapMode {
+        REPEAT,
+        CLAMP_TO_EDGE,
+        MIRRORED_REPEAT
+    };
+
+    struct Texture {
+        const uint32_t width{0};
+        const uint32_t height{0};
+        const std::vector<uint8_t> data;
+        const Filter   minFilter{Filter::NEAREST};
+        const Filter   magFilter{Filter::NEAREST};
+        const Filter   mipmapMode{Filter::NEAREST};
+        const WrapMode wrapU{WrapMode::REPEAT};
+        const WrapMode wrapV{WrapMode::REPEAT};
+
+        Texture(uint32_t width, uint32_t height, const std::vector<uint8_t> &data,
+                const Filter& minFilter, const Filter& magFilter, const Filter& mipmapMode, const WrapMode& wrapU, const WrapMode& wrapV);
+    };
+
+    struct Scene {
+        const std::vector<Vertex>   vertices;
+        const std::vector<Triangle> triangles;
         const std::vector<Material> materials;
-        const Camera camera;
+        const std::vector<Texture> textures;
 
-    public:
-        Scene(const std::vector<TrianglePrimitive>& trianglePrimitives,
-              const Camera& camera);
-        [[nodiscard]] const std::vector<TrianglePrimitive>& getTrianglePrimitives() const;
-        [[nodiscard]] const Camera& getCamera() const;
+        Scene(const std::vector<Vertex>& vertices, const std::vector<Triangle>& triangles,
+              const std::vector<Material>& materials, const std::vector<Texture>& texture);
     };
 } // rt

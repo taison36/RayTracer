@@ -1,4 +1,5 @@
 #include "VkCore.h"
+#include "vulkan/vulkan.hpp"
 #include "vulkan/vulkan_beta.h"
 #include <print>
 #include <iostream>
@@ -23,8 +24,26 @@ namespace rt::gfx {
                                               .engineVersion      = VK_MAKE_VERSION( 1, 0, 0 ),
                                               .apiVersion         = vk::ApiVersion14
         };
+        VkBool32 val = VK_TRUE;
+
+        vk::LayerSettingEXT setting{
+            .pLayerName   = "MoltenVK",
+            .pSettingName = "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS",
+            .type         = vk::LayerSettingTypeEXT::eBool32,
+            .valueCount   = 1,
+            .pValues      = &val
+        };
+        
+        vk::LayerSettingsCreateInfoEXT layerSettings{
+            .settingCount = 1,
+            .pSettings    = &setting
+        };
         //MAC specific extensions
-        std::vector<const char*> requiredExtensions = {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
+        std::vector<const char*> requiredExtensions = {
+            VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+            VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+            VK_EXT_LAYER_SETTINGS_EXTENSION_NAME
+        };
     
         const std::vector<const char *> validationLayers = {
             "VK_LAYER_KHRONOS_validation"
@@ -62,7 +81,8 @@ namespace rt::gfx {
                                           .enabledLayerCount       = static_cast<std::uint32_t>(requiredLayers.size()),
                                           .ppEnabledLayerNames     = requiredLayers.data(),
                                           .enabledExtensionCount   = static_cast<std::uint32_t>(requiredExtensions.size()),
-                                          .ppEnabledExtensionNames = requiredExtensions.data()
+                                          .ppEnabledExtensionNames = requiredExtensions.data(),
+                                          .pNext = &layerSettings
         };
     
         instance = vk::raii::Instance(context, createInfo);
@@ -97,10 +117,13 @@ namespace rt::gfx {
             return !!(qfp.queueFlags & vk::QueueFlagBits::eCompute);});
     
       auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2,
+                                                           vk::PhysicalDeviceDescriptorIndexingFeatures,
                                                            vk::PhysicalDeviceVulkan13Features,
                                                            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
       bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
-                                      features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
+                                      features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
+                                      features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>().shaderSampledImageArrayNonUniformIndexing &&
+                                      features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>().descriptorBindingSampledImageUpdateAfterBind;
     
       return supportsVulkan1_3 && supportsGraphics && supportsRequiredFeatures;
     }
@@ -125,14 +148,35 @@ namespace rt::gfx {
                                                         .queueCount = 1,
                                                         .pQueuePriorities = &queuePriority
         };
-        vk::StructureChain<vk::PhysicalDeviceFeatures2,
-                           vk::PhysicalDeviceVulkan13Features,
-                           vk::PhysicalDeviceTimelineSemaphoreFeatures,
-                           vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {{},                              
-                                                                                              {.dynamicRendering     = true,
-                                                                                               .synchronization2     = true },    
-                                                                                              {.timelineSemaphore    = true},
-                                                                                              {.extendedDynamicState = true }
+        vk::StructureChain<
+            vk::PhysicalDeviceFeatures2,
+            vk::PhysicalDeviceVulkan13Features,
+            vk::PhysicalDeviceTimelineSemaphoreFeatures,
+            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+            vk::PhysicalDeviceDescriptorIndexingFeatures 
+        > featureChain = {
+            {
+                .features = {
+                    .samplerAnisotropy = true
+                }
+            },
+            {
+                .dynamicRendering = true,
+                .synchronization2 = true
+            },
+            {
+                .timelineSemaphore = true
+            },
+            {
+                .extendedDynamicState = true
+            },
+            {
+                .runtimeDescriptorArray = true,
+                .shaderSampledImageArrayNonUniformIndexing = true,
+                .descriptorBindingSampledImageUpdateAfterBind = true,
+                .descriptorBindingPartiallyBound = true,
+                .descriptorBindingVariableDescriptorCount = true
+            }
         };
     
         std::vector<const char*> deviceExtensions;
@@ -179,13 +223,14 @@ namespace rt::gfx {
     	queue.waitIdle();
     }
     
-    void VkCore::transitionImageLayout(const vk::raii::Image &image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) const {
-    	auto commandBuffer = beginSingleTimeCommands();
-    
-    	vk::ImageMemoryBarrier2 imgMemoryBarrier{.oldLayout = oldLayout,
-                                        .newLayout = newLayout,
-                                        .image = image,
-                                        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+    //TODO I need to rethink it later. If i upload lots of images, i should transition them with one barrier call. Not many different calls.
+    void VkCore::transitionImageLayout(const vk::raii::Image &image, vk::ImageLayout oldLayout,
+                                       vk::ImageLayout newLayout, const vk::CommandBuffer& commandBuffer) const {
+    	vk::ImageMemoryBarrier2 imgMemoryBarrier{
+            .oldLayout = oldLayout,
+            .newLayout = newLayout,
+            .image = image,
+            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
         };
     
     	if (oldLayout == vk::ImageLayout::eGeneral && newLayout == vk::ImageLayout::eTransferSrcOptimal) {
@@ -195,24 +240,71 @@ namespace rt::gfx {
     		imgMemoryBarrier.setSrcStageMask(vk::PipelineStageFlagBits2::eComputeShader);
     		imgMemoryBarrier.setDstStageMask(vk::PipelineStageFlagBits2::eTransfer);
     	} else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eGeneral) {
-            imgMemoryBarrier.setSrcAccessMask({});
+    		imgMemoryBarrier.setSrcAccessMask({});
     		imgMemoryBarrier.setDstAccessMask(vk::AccessFlagBits2::eShaderWrite);
     
     		imgMemoryBarrier.setSrcStageMask(vk::PipelineStageFlagBits2::eTopOfPipe);
     		imgMemoryBarrier.setDstStageMask(vk::PipelineStageFlagBits2::eComputeShader);
-        } else {
+    	} else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
+    		imgMemoryBarrier.setSrcAccessMask({});
+    		imgMemoryBarrier.setDstAccessMask(vk::AccessFlagBits2::eTransferWrite);
+
+    		imgMemoryBarrier.setSrcStageMask(vk::PipelineStageFlagBits2::eTopOfPipe);
+    		imgMemoryBarrier.setDstStageMask(vk::PipelineStageFlagBits2::eTransfer);
+		} else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+    		imgMemoryBarrier.setSrcAccessMask(vk::AccessFlagBits2::eTransferWrite);
+    		imgMemoryBarrier.setDstAccessMask(vk::AccessFlagBits2::eShaderRead);
+
+    		imgMemoryBarrier.setSrcStageMask(vk::PipelineStageFlagBits2::eTransfer);
+    		imgMemoryBarrier.setDstStageMask(vk::PipelineStageFlagBits2::eComputeShader);
+		} else {
             std::println("[ERROR] vk::ImageLayout not found: {}", vk::to_string(newLayout));
     		throw std::invalid_argument("unsupported layout transition:");
     	}
         vk::DependencyInfo dependencyInfo{.pImageMemoryBarriers = &imgMemoryBarrier,
                                           .imageMemoryBarrierCount = 1
         };
-        commandBuffer->pipelineBarrier2(dependencyInfo);
-    	endSingleTimeCommands(*commandBuffer);
+        commandBuffer.pipelineBarrier2(dependencyInfo);
     }
 
-    void VkCore::copyImageToBuffer(const vk::raii::Image &image, vk::raii::Buffer &buffer, const uint32_t HEIGHT, const uint32_t WIDTH) const {
-    	const auto singleTimeCommandBuffer = beginSingleTimeCommands();
+
+    void VkCore::copyBufferToImage(const vk::raii::Image &image, const vk::raii::Buffer &buffer, uint32_t HEIGHT, uint32_t WIDTH, uint32_t offset, const vk::CommandBuffer& commandBuffer) const {
+        vk::ImageSubresourceLayers imageSubresourceLayersInfo{
+            .aspectMask = vk::ImageAspectFlagBits::eColor,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+            .mipLevel = 0
+        };
+        vk::BufferImageCopy2 bufferImageCopyInfo{
+            .bufferOffset = offset,
+            .bufferImageHeight = 0,
+            .bufferRowLength = 0,
+            .imageSubresource = imageSubresourceLayersInfo,
+            .imageExtent = {WIDTH, HEIGHT, 1},
+            .imageOffset = {0, 0, 0}
+        };
+        vk::CopyBufferToImageInfo2 copyBufferToImageInfo{
+            .dstImage       = image,
+            .regionCount    = 1,
+            .pRegions       = &bufferImageCopyInfo,
+            .srcBuffer      = buffer,
+            .dstImageLayout = vk::ImageLayout::eTransferDstOptimal
+        };
+
+        commandBuffer.copyBufferToImage2(copyBufferToImageInfo);
+    }
+
+    void VkCore::fillBuffer(const vk::raii::Buffer& srcBuffer, const vk::raii::Buffer& dstBuffer, size_t size, uint32_t offset, const vk::raii::CommandBuffer& commandBuffer) const {
+        vk::BufferCopy copyRegion{
+            .size = size,
+            .srcOffset = offset
+        };
+        
+        commandBuffer.copyBuffer(srcBuffer, dstBuffer, copyRegion);
+    }
+
+    void VkCore::copyImageToBuffer(const vk::raii::Image &image, vk::raii::Buffer &buffer, uint32_t HEIGHT, uint32_t WIDTH) const {
+    	const auto commandBuffer = beginSingleTimeCommands();
         vk::ImageSubresourceLayers imageSubresourceLayersInfo{.aspectMask = vk::ImageAspectFlagBits::eColor,
                                                               .baseArrayLayer = 0,
                                                               .layerCount = 1,
@@ -231,12 +323,13 @@ namespace rt::gfx {
                                                          .pRegions = &bufferImageCopyInfo,
                                                          .regionCount = 1
         };
-        singleTimeCommandBuffer->copyImageToBuffer2(copyImageToBufferInfo);
-        endSingleTimeCommands(*singleTimeCommandBuffer);
+        commandBuffer->copyImageToBuffer2(copyImageToBufferInfo);
+        endSingleTimeCommands(*commandBuffer);
     }
     
     void VkCore::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
                                    vk::raii::Buffer &buffer, vk::raii::DeviceMemory &bufferMemory) const {
+        assert(size != 0);
     	vk::BufferCreateInfo bufferInfo{.size = size,
                                         .usage = usage,
                                         .sharingMode = vk::SharingMode::eExclusive
@@ -253,6 +346,10 @@ namespace rt::gfx {
 
     const vk::raii::Device& VkCore::getDevice() const {
         return device;
+    }
+
+    const vk::raii::PhysicalDevice& VkCore::getPhysicalDevice() const {
+        return physicalDevice;
     }
 
     [[nodiscard]] uint32_t VkCore::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const {
@@ -272,5 +369,9 @@ namespace rt::gfx {
         };
         vk::raii::ShaderModule shaderModule{device, createInfo};
         return shaderModule;
+    }
+
+    [[nodiscard]] uint32_t VkCore::getQueueFamilyIndex() const {
+        return queueFamilyIndex;
     }
 }// rt::gfx

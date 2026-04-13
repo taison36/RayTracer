@@ -1,22 +1,23 @@
 #pragma once
-#include "../objects/Color.h"
+#include "../objects/UtilObjects.h"
+#include <cstdint>
 #include <vector>
 
 namespace rt{
 
     class FrameBuffer {
         std::vector<Color> pixels;
-        const int WIDTH;
-        const int HEIGHT;
-    
     public:
+        const uint32_t COLS;
+        const uint32_t ROWS;
+
         class ConstIterator {
             const Color* ptr;
-            int index;
+            uint32_t index;
             size_t cols;
     
         public:
-            ConstIterator(const Color* dataPointer, size_t startIndex, int columns);
+            ConstIterator(const Color* dataPointer, size_t startIndex, uint32_t columns);
     
             const Color& operator*() const;
     
@@ -31,10 +32,10 @@ namespace rt{
         class Iterator {
             Color* ptr;
             size_t index;
-            int cols;
+            uint32_t cols;
     
         public:
-            Iterator(Color* dataPointer, size_t startIndex, int columns);
+            Iterator(Color* dataPointer, size_t startIndex, uint32_t columns);
     
             Color& operator*() const;
     

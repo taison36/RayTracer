@@ -64,6 +64,8 @@ endfunction()
 
 set(SHADERS
     ${CMAKE_CURRENT_LIST_DIR}/shaders/checker.slang
+    ${CMAKE_CURRENT_LIST_DIR}/shaders/raytracer.slang
+    ${CMAKE_CURRENT_LIST_DIR}/shaders/test.slang
 )
 
 compileShaderSlang(compileShaders
