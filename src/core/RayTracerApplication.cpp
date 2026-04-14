@@ -13,12 +13,11 @@ namespace rt {
           buffer(std::make_unique<FrameBuffer>(WIDTH, HEIGHT)),
           renderer(std::make_unique<gfx::Renderer>(std::move(accelStruct))) {
 
-       // glm::vec3 modelCenter(-24.0f, 18.0f, 11.0f);
         glm::vec3 modelCenter(0.0f, 0.0f, 0.0f);
-        glm::vec3 cameraPos = modelCenter + glm::vec3(-3.0f, 7.0f, 18.0f);
-        glm::vec3 dir = glm::normalize(modelCenter - cameraPos); // direction from camera to model
-        float pitch = glm::degrees(asin(dir.y)); // vertical angle
-        float yaw = glm::degrees(atan2(dir.z, dir.x)); // horizontal angle
+        glm::vec3 cameraPos = modelCenter + glm::vec3(-3.0f, 16.0f, 40.0f);
+        glm::vec3 dir = glm::normalize(modelCenter - cameraPos);
+        float pitch = glm::degrees(asin(dir.y)); 
+        float yaw = glm::degrees(atan2(dir.z, dir.x));
 
         camera = std::make_unique<Camera>(cameraPos, glm::vec3(0.0f, 1.0f, 0.0f), yaw, pitch, screenSettings->FOV);
         scene = std::make_unique<Scene>(SceneLoader::loadScene(scenePath, *camera));

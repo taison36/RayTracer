@@ -9,45 +9,45 @@ namespace rt {
 #define RT_MAXSIZE_NUM_TEXCOORD 16
 
     struct alignas(16) Vertex {
-        glm::vec3 position{};
-        glm::vec3 normal{}; 
+        glm::vec4 position{};
+        glm::vec4 normal{}; 
         glm::vec4 tangent{};
-        std::array<glm::vec2, RT_MAXSIZE_NUM_TEXCOORD> texCoord{};
+        std::array<glm::vec4, RT_MAXSIZE_NUM_TEXCOORD> texCoord{};
 
         Vertex() = default;
-        Vertex(const glm::vec3& position,
-               const glm::vec3& normal,
+        Vertex(const glm::vec4& position,
+               const glm::vec4& normal,
                const glm::vec4& tangent,
-               const std::array<glm::vec2, RT_MAXSIZE_NUM_TEXCOORD>& texCoord);
+               const std::array<glm::vec4, RT_MAXSIZE_NUM_TEXCOORD>& texCoord);
     };
 
-    struct alignas(16) Triangle {
+    struct Triangle {
         std::array<uint32_t, 3> indices;
         uint32_t material;
 
         Triangle(const std::array<uint32_t, 3>& indices, uint32_t material);
     };
 
-    struct alignas(8) TextureInfo {
-      int index{-1};
-      int texCoord{0}; // The set index of texture's TEXCOORD attribute used for
+    struct TextureInfo {
+        int32_t index{-1};
+        int32_t texCoord{-1};
     };
 
-    struct alignas(16) PbrMetallicRoughness
-    {
-        glm::vec4   baseColorFactor;
+    struct PbrMetallicRoughness {
+        glm::vec4 baseColorFactor; 
         TextureInfo baseColorTexture;
-        int32_t     _pad0[2]; // pad to 16 bytes
-        float      metallicFactor{1.0};
-        float      roughnessFactor{1.0};
-        int32_t    _pad1[2]; // pad to 16 bytes
+        float metallicFactor;
+        float roughnessFactor;
+
+        glm::vec2 _pad0;
+    
         TextureInfo metallicRoughnessTexture;
-        int32_t _pad2[2]; // pad final 16-byte boundary
+
+        glm::vec4 _pad1;
     };
 
-    struct alignas(16) Material {
-        glm::vec3 emissiveFactor;
-        float _pad0;
+    struct Material {
+        glm::vec4 emissiveFactor;
         PbrMetallicRoughness pbrMetallicRoughness;
     };
 

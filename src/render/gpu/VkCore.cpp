@@ -119,7 +119,9 @@ namespace rt::gfx {
       auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2,
                                                            vk::PhysicalDeviceDescriptorIndexingFeatures,
                                                            vk::PhysicalDeviceVulkan13Features,
-                                                           vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+                                                           vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+                                                           >();
+
       bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
                                       features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
                                       features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>().shaderSampledImageArrayNonUniformIndexing &&
@@ -153,7 +155,7 @@ namespace rt::gfx {
             vk::PhysicalDeviceVulkan13Features,
             vk::PhysicalDeviceTimelineSemaphoreFeatures,
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
-            vk::PhysicalDeviceDescriptorIndexingFeatures 
+            vk::PhysicalDeviceDescriptorIndexingFeatures
         > featureChain = {
             {
                 .features = {
@@ -180,6 +182,7 @@ namespace rt::gfx {
         };
     
         std::vector<const char*> deviceExtensions;
+
         if (enableValidationLayers) 
         {
           deviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME); // needed for macOS
@@ -296,8 +299,8 @@ namespace rt::gfx {
 
     void VkCore::fillBuffer(const vk::raii::Buffer& srcBuffer, const vk::raii::Buffer& dstBuffer, size_t size, uint32_t offset, const vk::raii::CommandBuffer& commandBuffer) const {
         vk::BufferCopy copyRegion{
-            .size = size,
-            .srcOffset = offset
+            .srcOffset = offset,
+            .size = size
         };
         
         commandBuffer.copyBuffer(srcBuffer, dstBuffer, copyRegion);

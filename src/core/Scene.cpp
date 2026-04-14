@@ -1,10 +1,11 @@
 #include "Scene.h"
+#include <print>
 
 namespace rt {
-    Vertex::Vertex(const glm::vec3& position,
-                   const glm::vec3& normal,
+    Vertex::Vertex(const glm::vec4& position,
+                   const glm::vec4& normal,
                    const glm::vec4& tangent,
-                   const std::array<glm::vec2, RT_MAXSIZE_NUM_TEXCOORD>& texCoord) :
+                   const std::array<glm::vec4, RT_MAXSIZE_NUM_TEXCOORD>& texCoord) :
         position(position), 
         normal(normal),
         tangent(tangent),
@@ -33,5 +34,8 @@ namespace rt {
       triangles(triangles),
       materials(materials),
       textures(texture) {
+        std::println("Material size: {}", sizeof(Material));
+        std::println("PbrMetallicRoughness size: {}", sizeof(PbrMetallicRoughness));
+        std::println("TextureInfo size: {}", sizeof(TextureInfo));
     }
 } // rt

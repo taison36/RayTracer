@@ -60,7 +60,7 @@ namespace rt::gfx {
         void createDescriptorPool(const VkCore& vkCore, const RendererContext& context);
         void createDescriptorLayouts(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage);
         void writeStaticDescriptorSets(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage);
-        void writeBindlessDescriptorSets(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage);
+        void writeBindlessDescriptorSets(const VkCore& vkCore, const RendererContext& context);
         void createPipeline(const VkCore& vkCore);
     public:
         BruteForce() = default;

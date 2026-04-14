@@ -13,6 +13,7 @@ namespace rt::gfx {
         createDescriptorPool(vkCore, context);
         createDescriptorLayouts(vkCore, context, outputImage);
         writeStaticDescriptorSets(vkCore, context, outputImage);
+        writeBindlessDescriptorSets(vkCore, context);
         createPipeline(vkCore);
     }
 
@@ -250,7 +251,7 @@ namespace rt::gfx {
 
     void BruteForce::createDescriptorLayouts(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage) {
         std::vector<vk::DescriptorSetLayoutBinding> layoutBindings = {
-            vk::DescriptorSetLayoutBinding{.binding = 0, .descriptorType = vk::DescriptorType::eStorageImage       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+            vk::DescriptorSetLayoutBinding{.binding = 0, .descriptorType = vk::DescriptorType::eStorageImage        , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
             vk::DescriptorSetLayoutBinding{.binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
             vk::DescriptorSetLayoutBinding{.binding = 2, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
             vk::DescriptorSetLayoutBinding{.binding = 3, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
@@ -366,28 +367,33 @@ namespace rt::gfx {
         vkCore.getDevice().updateDescriptorSets(writes, {});
     }
 
-    void BruteForce::writeBindlessDescriptorSets(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage) {
-      //  std::vector<vk::DescriptorImageInfo> texturesInfos;
-      //  texturesInfos.reserve(textures.size());
-      //  for (const TextureImage& tex : textures) {
-      //      texturesInfos.emplace_back(vk::DescriptorImageInfo{
-      //              .sampler = tex.sampler,
-      //              .imageView = tex.view,
-      //              .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
-      //      });
-      //  }
+    void BruteForce::writeBindlessDescriptorSets(const VkCore& vkCore, const RendererContext& context) {
+        std::vector<vk::DescriptorImageInfo> texturesInfos;
+        texturesInfos.reserve(textures.size());
+        for (const TextureImage& tex : textures) {
+            texturesInfos.emplace_back(vk::DescriptorImageInfo{
+                    .sampler = tex.sampler,
+                    .imageView = tex.view,
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+            });
+        }
 
-      //  vk::WriteDescriptorSet {
-      //      .dstSet = descriptorSets.front(),
-      //      .dstBinding = 5,
-      //      .dstArrayElement = 0,
-      //      .descriptorCount = static_cast<uint32_t>(texturesInfos.size()),
-      //      .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-      //      .pImageInfo = texturesInfos.data()
-      //  }
+        vk::WriteDescriptorSet write {
+            .dstSet = descriptorSets.front(),
+            .dstBinding = 5,
+            .dstArrayElement = 0,
+            .descriptorCount = static_cast<uint32_t>(texturesInfos.size()),
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+            .pImageInfo = texturesInfos.data()
+        };
+        vkCore.getDevice().updateDescriptorSets(write, {});
+
+        for (int i = 0; i < 1000*1000*1000; ++i) {
+        }
     }
+
     void BruteForce::createPipeline(const VkCore& vkCore){
-        vk::raii::ShaderModule shaderModule = vkCore.createShaderModule(readFile("shaders/test.spv"));
+       vk::raii::ShaderModule shaderModule = vkCore.createShaderModule(readFile("shaders/raytrace.spv"));
         vk::PipelineShaderStageCreateInfo shaderStageInfo{
             .stage = vk::ShaderStageFlagBits::eCompute,
             .module = shaderModule,

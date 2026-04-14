@@ -204,7 +204,7 @@ namespace rt {
         return result;
     }
 
-    std::vector<Triangle> readPrimitiveIndices(const tinygltf::Primitive &tinyPrimitive, const tinygltf::Model &tinyModel, uint32_t offsetIndexBegin) {
+    std::vector<Triangle> readPrimitiveIndices(const tinygltf::Primitive &tinyPrimitive, const tinygltf::Model &tinyModel, const uint32_t offsetIndexBegin) {
         std::vector<Triangle> triangles;
         const auto &tinyAccessor = tinyModel.accessors[tinyPrimitive.indices];
 
@@ -247,7 +247,7 @@ namespace rt {
                             offsetIndexBegin + indices[i + 1],
                             offsetIndexBegin + indices[i + 2]
                         },
-                        tinyPrimitive.material
+                       tinyPrimitive.material
                     );
                 }
                 break;
@@ -332,7 +332,7 @@ namespace rt {
                     throw std::runtime_error("[ERROR] unexpected primitve attribute type");
                 }
                 tangents = readAccessorVec<4, float>(tinyModel, tinyModel.accessors[accessorIndex]);
-            } else {
+            } else if (attributeKey.starts_with("TEXCOORD_")){
                 if (!checkForExpectedTypes(tinyModel.accessors[accessorIndex], AccessorClassDataType::VEC2,
                                            AccessorBasisDataType::FLOAT)) {
                     throw std::runtime_error("[ERROR] unexpected primitve attribute type");
@@ -355,23 +355,28 @@ namespace rt {
 
                 textCoordinates[texCoordIndex] = readAccessorVec<2, float>(
                     tinyModel, tinyModel.accessors[accessorIndex]);
+            }else {
+                std::println("[WARN] unexpected primitve attribute type: {}. Wasn't processed and got skipped", attributeKey);
             }
         }
 
         assert(!positions.empty());
-        if (normals.empty()) normals = buildNormals(newTriangles, positions);
+        for (auto& pos : positions) {
+            pos = glm::vec3(worldMatrix * glm::vec4(pos, 1.0f));
+        }
+        //TODO
+        //normals = buildNormals(newTriangles, positions);
 
         for (size_t i = 0; i < positions.size(); ++i) {
             Vertex v;
-            positions[i] = glm::vec3(worldMatrix * glm::vec4(positions[i], 1.0f));
-            v.position = positions[i];
-            v.normal   = normals[i];
+            v.position = glm::vec4(positions[i], 0.0f);
+            v.normal   = glm::vec4(normals[i], 0.0f);
             v.tangent  = tangents.empty() ? glm::vec4(0.0f) : tangents[i];
             for (int j = 0; j < RT_MAXSIZE_NUM_TEXCOORD; ++j) {
                 if (textCoordinates[j].empty()) {
                     continue;
                 }
-                v.texCoord[j] = textCoordinates[j][i];
+                v.texCoord[j] = glm::vec4(textCoordinates[j][i], 0.0f, 0.0f);
             }
 
             vertices.push_back(v);
@@ -397,10 +402,11 @@ namespace rt {
     Material convertMaterial(const tinygltf::Material &tm) {
         Material material;
 
-        material.emissiveFactor = glm::vec3(
+        material.emissiveFactor = glm::vec4(
             static_cast<float>(tm.emissiveFactor[0]),
             static_cast<float>(tm.emissiveFactor[1]),
-            static_cast<float>(tm.emissiveFactor[2])
+            static_cast<float>(tm.emissiveFactor[2]),
+            0.0f
         );
 
         const auto &pbr = tm.pbrMetallicRoughness;
@@ -410,10 +416,10 @@ namespace rt {
                 static_cast<float>(pbr.baseColorFactor[0]),
                 static_cast<float>(pbr.baseColorFactor[1]),
                 static_cast<float>(pbr.baseColorFactor[2]),
-                0.0f
+                static_cast<float>(pbr.baseColorFactor[3])
             },
             .baseColorTexture = {
-                .index = pbr.baseColorTexture.index,
+                .index    = pbr.baseColorTexture.index,
                 .texCoord = pbr.baseColorTexture.texCoord
             },
             .metallicFactor = static_cast<float>(pbr.metallicFactor),
@@ -431,7 +437,7 @@ namespace rt {
     Texture convertTexture(const tinygltf::Model &tinyModel, const tinygltf::Texture &tinyTexture) {
         int width, height, channels;
         const auto &tinyImage = tinyModel.images[tinyTexture.source];
-
+        assert(!tinyImage.uri.empty());
         unsigned char *rawData = stbi_load(("resources/simple_model/" + tinyImage.uri).c_str(), &width, &height,
                                            &channels, 4);
 
@@ -533,8 +539,6 @@ namespace rt {
         constexpr float SCALE = 0.01f;
         glm::mat4 worldMatrix{1.0f};
         worldMatrix = glm::scale(worldMatrix, glm::vec3(SCALE));
-        worldMatrix = camera.getView() * worldMatrix;
-        // TODO If i will do online rendering -> move cameraView multiplication into separate compute pipieline step
 
         std::vector<Vertex> vertices;
         std::vector<Triangle> triangles;
@@ -552,7 +556,6 @@ namespace rt {
         for (const auto &tinyTexture: tinyModel.textures) {
             textures.push_back(convertTexture(tinyModel, tinyTexture));
         }
-
         return {vertices, triangles, materials, textures};
     }
 } //rt
