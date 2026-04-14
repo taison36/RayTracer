@@ -48,9 +48,6 @@ struct SceneSettings {
     uint       samplesPerPixel;
 };
 
-// -----------------------------------------------------------
-// Bindings
-// -----------------------------------------------------------
 [vk::binding(0, 0)] RWTexture2D<float4>           outputImage;
 [vk::binding(1, 0)] StructuredBuffer<Vertex>      vertices;
 [vk::binding(2, 0)] StructuredBuffer<Triangle>    triangles;
@@ -58,9 +55,6 @@ struct SceneSettings {
 [vk::binding(4, 0)] ConstantBuffer<SceneSettings> scene;
 [vk::binding(5, 0)] Sampler2D                     textures[];
 
-// -----------------------------------------------------------
-// Ray Structure
-// -----------------------------------------------------------
 struct Ray {
     float3 origin;
     float3 direction;
@@ -75,14 +69,10 @@ struct HitInfo {
     uint   materialIndex;
 };
 
-// -----------------------------------------------------------
-// Ray Generation
-// -----------------------------------------------------------
 Ray generateRay(uint2 pixelCoord, uint2 dimensions) {
     // Normalized device coordinates [-1, 1]
     float2 ndc = (float2(pixelCoord) + 0.5) / float2(dimensions) * 2.0 - 1.0;
     
-    // Unproject to get ray direction
     float4 target = mul(scene.camera.projInverse, float4(ndc.x, ndc.y, 1.0, 1.0));
     target /= target.w;
     
@@ -94,9 +84,6 @@ Ray generateRay(uint2 pixelCoord, uint2 dimensions) {
     return ray;
 }
 
-// -----------------------------------------------------------
-// Ray-Triangle Intersection (Möller–Trumbore algorithm)
-// -----------------------------------------------------------
 bool intersectTriangle(Ray ray, uint triIndex, out float t, out float2 barycentrics)
 {
     t = 0;
@@ -114,7 +101,6 @@ bool intersectTriangle(Ray ray, uint triIndex, out float t, out float2 barycentr
     float3 h = cross(ray.direction, edge2);
     float a = dot(edge1, h);
     
-    // Ray parallel to triangle
     if (abs(a) < 1e-8)
         return false;
     
@@ -140,9 +126,6 @@ bool intersectTriangle(Ray ray, uint triIndex, out float t, out float2 barycentr
     return true;
 }
 
-// -----------------------------------------------------------
-// Scene Intersection
-// -----------------------------------------------------------
 HitInfo traceRay(Ray ray) {
     HitInfo hit;
     hit.hit = false;
@@ -193,7 +176,7 @@ float4 shade(HitInfo hit)
 {
     if (!hit.hit)
     {
-        // Sky/background color
+        // background color
         return float4(0.0, 0.0, 0.0, 1.0);
     }
     
@@ -202,9 +185,7 @@ float4 shade(HitInfo hit)
     int texIndex = mat.pbr.baseColorTexture.index;
     return texIndex != -1 ? textures[texIndex].SampleLevel(hit.texCoord, 0.0) : mat.pbr.baseColorFactor;
 }
-// -----------------------------------------------------------
-// Compute Shader Entry Point
-// -----------------------------------------------------------
+
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
@@ -216,15 +197,11 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     if (pixelCoord.x >= dimensions.x || pixelCoord.y >= dimensions.y)
         return;
     
-    // Generate primary ray
     Ray ray = generateRay(pixelCoord, dimensions);
     
-    // Trace ray
     HitInfo hit = traceRay(ray);
     
-    // Shade
     float4 color = shade(hit);
     
-    // Write to output
     outputImage[pixelCoord] = color;
 }
