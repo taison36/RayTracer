@@ -5,8 +5,8 @@
 #include <memory>
 
 namespace rt {
-    static constexpr uint32_t WIDTH  = 1920;
-    static constexpr uint32_t HEIGHT = 1080;
+    static constexpr uint32_t WIDTH  = 1024;
+    static constexpr uint32_t HEIGHT = 768;
     static constexpr int FOV    = 60.0f;
 
     class RayTracerApplication {
@@ -14,7 +14,6 @@ namespace rt {
         std::unique_ptr<FrameBuffer>    buffer;
         std::unique_ptr<gfx::Renderer>  renderer;
         std::unique_ptr<Scene>          scene;
-        std::unique_ptr<Camera>         camera;
 
         void save_as_ppm(const char* filename);
     public:

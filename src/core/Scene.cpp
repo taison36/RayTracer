@@ -29,13 +29,22 @@ namespace rt {
     }
 
     Scene::Scene(const std::vector<Vertex>& vertices, const std::vector<Triangle>& triangles,
-                 const std::vector<Material>& materials, const std::vector<Texture>& texture)
+                 const std::vector<Material>& materials, const std::vector<Texture>& textures,
+                 const std::vector<uint32_t>& emissiveLight, const std::vector<DirectionalLight>& directionalLight,
+                 const std::vector<PointLight>& pointLight, const std::vector<SpotLight>& spotLight,
+                 const Camera& camera)
     : vertices(vertices),
       triangles(triangles),
       materials(materials),
-      textures(texture) {
-        std::println("Material size: {}", sizeof(Material));
-        std::println("PbrMetallicRoughness size: {}", sizeof(PbrMetallicRoughness));
-        std::println("TextureInfo size: {}", sizeof(TextureInfo));
+      textures(textures),
+      emissiveLight(emissiveLight),
+      directionalLight(directionalLight),
+      pointLight(pointLight),
+      spotLight(spotLight),
+      camera(camera) {
+    }
+
+    Scene SceneBuilder::build() {
+        return Scene(vertices, triangles, materials, textures, emissiveLight, directionalLight, pointLight, spotLight, camera);
     }
 } // rt

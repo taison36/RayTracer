@@ -49,12 +49,10 @@ namespace rt {
     namespace gfx {
         struct RendererContext {
             const Scene *scene;
-            const Camera *camera;
             const ScreenSettings *screenSettings;
 
-            RendererContext(const Scene *scene, const Camera *camera, const ScreenSettings *screenSettings)
+            RendererContext(const Scene *scene, const ScreenSettings *screenSettings)
                 : scene(scene),
-                  camera(camera),
                   screenSettings(screenSettings) {
             }
         };

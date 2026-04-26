@@ -21,34 +21,66 @@ namespace rt {
                const std::array<glm::vec4, RT_MAXSIZE_NUM_TEXCOORD>& texCoord);
     };
 
-    struct Triangle {
+    struct alignas(16) Triangle {
         std::array<uint32_t, 3> indices;
         uint32_t material;
 
         Triangle(const std::array<uint32_t, 3>& indices, uint32_t material);
     };
 
-    struct TextureInfo {
-        int32_t index{-1};
-        int32_t texCoord{-1};
+    struct alignas(16) TextureInfo {
+        int32_t   index{-1};
+        int32_t   texCoord{-1};
+        glm::vec2 pad_0;
     };
 
-    struct PbrMetallicRoughness {
-        glm::vec4 baseColorFactor; 
+    struct alignas(16) PbrMetallicRoughness {
+        glm::vec4   baseColorFactor; 
         TextureInfo baseColorTexture;
-        float metallicFactor;
-        float roughnessFactor;
-
-        glm::vec2 _pad0;
+        float       metallicFactor;
+        float       roughnessFactor;
+        glm::vec2   pad_0;
     
         TextureInfo metallicRoughnessTexture;
-
-        glm::vec4 _pad1;
+        glm::vec4   pad_1;
     };
 
     struct Material {
-        glm::vec4 emissiveFactor;
+        glm::vec4            emissiveFactor;
         PbrMetallicRoughness pbrMetallicRoughness;
+        TextureInfo          emissiveTexture;
+    };
+
+    // DirectionalLight - Needs padding
+    struct alignas(16) DirectionalLight {
+        glm::vec4 color;        // 16 bytes, offset 0
+        glm::vec4 direction;    // 16 bytes, offset 16
+        float     intensity;    // 4 bytes, offset 32
+        float     range;        // 4 bytes, offset 36
+        glm::vec2 _pad0;        // 8 bytes, offset 40
+        // Total: 48 bytes
+    };
+    
+    // PointLight - Needs padding
+    struct alignas(16) PointLight {
+        glm::vec4 position;     // 16 bytes, offset 0
+        glm::vec4 color;        // 16 bytes, offset 16
+        float     intensity;    // 4 bytes, offset 32
+        float     range;        // 4 bytes, offset 36
+        glm::vec2 _pad0;        // 8 bytes, offset 40
+        // Total: 48 bytes
+    };
+
+    // SpotLight - Already correct
+    struct alignas(16) SpotLight {
+        glm::vec4 position;         // 16 bytes, offset 0
+        glm::vec4 color;            // 16 bytes, offset 16
+        glm::vec4 direction;        // 16 bytes, offset 32
+        float     intensity;        // 4 bytes, offset 48
+        float     range;            // 4 bytes, offset 52
+        float     innerConeAngle;   // 4 bytes, offset 56
+        float     outerConeAngle;   // 4 bytes, offset 60
+        // Total: 64 bytes
     };
 
     enum class Filter {
@@ -80,9 +112,37 @@ namespace rt {
         const std::vector<Vertex>   vertices;
         const std::vector<Triangle> triangles;
         const std::vector<Material> materials;
-        const std::vector<Texture> textures;
+        const std::vector<Texture>  textures;
+
+        const std::vector<uint32_t>         emissiveLight;
+        const std::vector<DirectionalLight> directionalLight;
+        const std::vector<PointLight>       pointLight;
+        const std::vector<SpotLight>        spotLight;
+
+        const Camera camera;
+
 
         Scene(const std::vector<Vertex>& vertices, const std::vector<Triangle>& triangles,
-              const std::vector<Material>& materials, const std::vector<Texture>& texture);
+              const std::vector<Material>& materials, const std::vector<Texture>& textures,
+              const std::vector<uint32_t>& emissiveLight, const std::vector<DirectionalLight>& directionalLight,
+              const std::vector<PointLight>& pointLight, const std::vector<SpotLight>& spotLight,
+              const Camera& camera);
     };
+
+    struct SceneBuilder {
+        std::vector<Vertex>   vertices;
+        std::vector<Triangle> triangles;
+        std::vector<Material> materials;
+        std::vector<Texture>  textures;
+
+        std::vector<uint32_t>         emissiveLight;
+        std::vector<DirectionalLight> directionalLight;
+        std::vector<PointLight>       pointLight;
+        std::vector<SpotLight>        spotLight;
+
+        Camera camera{};
+
+        Scene build();
+    };
+
 } // rt

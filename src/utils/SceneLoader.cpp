@@ -129,26 +129,29 @@ namespace rt {
             };
         }
 
-        //root node
-        if (node.scale.size() != 3 || node.translation.size() != 3 || node.rotation.size() != 4) {
-            return {1.0f};
+        glm::vec3 t(0.0f);
+        if (node.translation.size() == 3) {
+            t = {
+                static_cast<float>(node.translation[0]), static_cast<float>(node.translation[1]),
+                static_cast<float>(node.translation[2])
+            };
         }
 
-        const glm::vec3 t{
-            static_cast<float>(node.translation[0]), static_cast<float>(node.translation[1]),
-            static_cast<float>(node.translation[2])
-        };
-        const glm::quat q{
-            static_cast<float>(node.rotation[0]), static_cast<float>(node.rotation[1]),
-            static_cast<float>(node.rotation[2]), static_cast<float>(node.rotation[3])
-        };
-        const glm::vec3 s{
-            static_cast<float>(node.scale[0]), static_cast<float>(node.scale[1]), static_cast<float>(node.scale[2])
-        };
+        glm::quat q(1.0f, 0.0f, 0.0f, 0.0f);
+        if (node.rotation.size() == 4) {
+            // glTF is x,y,z,w. GLM quat ctor is w,x,y,z
+            q = glm::quat(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]);
+        }
+        glm::vec3 s(1.0f);
+        if (node.scale.size() == 3) {
+            s = {
+                static_cast<float>(node.scale[0]), static_cast<float>(node.scale[1]), static_cast<float>(node.scale[2])
+            };
+        }
 
-        const glm::mat4 T = glm::translate(glm::mat4{}, t);
+        const glm::mat4 T = glm::translate(glm::mat4(1.0f), t);
         const glm::mat4 R = glm::mat4_cast(q);
-        const glm::mat4 S = glm::scale(glm::mat4{}, s);
+        const glm::mat4 S = glm::scale(glm::mat4(1.0f), s);
 
         return T * R * S;
     }
@@ -260,7 +263,7 @@ namespace rt {
     }
 
     std::vector<glm::vec3> buildNormals( const std::vector<Triangle>& triangles, const std::vector<glm::vec3>& positions) {
-        std::vector<glm::vec3> normals(positions.size(), glm::vec3(0.0f));
+        std::vector normals(positions.size(), glm::vec3(0.0f));
     
         for (const Triangle& tri : triangles) {
             uint32_t i0 = tri.indices[0];
@@ -295,16 +298,15 @@ namespace rt {
     }
 
     void convertTrianglePrimitive(const tinygltf::Primitive &tinyPrimitive, const tinygltf::Model &tinyModel,
-                                  const glm::mat4 &worldMatrix, std::vector<Vertex> &vertices,
-                                  std::vector<Triangle> &triangles) {
+                                  const glm::mat4 &worldMatrix, SceneBuilder& sceneBuilder) {
         if (tinyPrimitive.mode != TINYGLTF_MODE_TRIANGLES) {
             throw std::runtime_error("[ERROR] Only triangle primitives are supported");
         }
-        uint32_t indexOffset = vertices.size();
+        uint32_t indexOffset = sceneBuilder.vertices.size();
         // need to shift indeces because they are zero-based and vertices can have already some data
-        std::vector<Triangle>  newTriangles = readPrimitiveIndices(tinyPrimitive, tinyModel, indexOffset);
-        triangles.insert(
-            triangles.end(),
+        std::vector<Triangle> newTriangles = readPrimitiveIndices(tinyPrimitive, tinyModel, indexOffset);
+        sceneBuilder.triangles.insert(
+            sceneBuilder.triangles.end(),
             newTriangles.begin(),
             newTriangles.end()
         );
@@ -364,8 +366,6 @@ namespace rt {
         for (auto& pos : positions) {
             pos = glm::vec3(worldMatrix * glm::vec4(pos, 1.0f));
         }
-        //TODO
-        //normals = buildNormals(newTriangles, positions);
 
         for (size_t i = 0; i < positions.size(); ++i) {
             Vertex v;
@@ -379,23 +379,94 @@ namespace rt {
                 v.texCoord[j] = glm::vec4(textCoordinates[j][i], 0.0f, 0.0f);
             }
 
-            vertices.push_back(v);
+            sceneBuilder.vertices.push_back(v);
         }
     }
 
+    Camera convertCamera(const tinygltf::Camera &tinyCam, const glm::mat4 &worldMatrix) {
+        const glm::vec3 position = glm::vec3(worldMatrix[3]);
+        const glm::vec3 up       = glm::normalize(glm::vec3(worldMatrix[1]));
+        const glm::vec3 forward  = -glm::normalize(glm::vec3(worldMatrix[2]));
+        const float yaw          = glm::degrees(atan2(forward.z, forward.x));
+        const float pitch        = glm::degrees(asin(forward.y));
 
-    void dfsNode(const tinygltf::Model &tinyModel, std::vector<Vertex> &vertices, std::vector<Triangle> &triangles,
-                 const tinygltf::Node &tinyNode, const glm::mat4 &parentWorldMatrix) {
+        auto builder = Camera::Builder().setPosition(position)
+                                        .setUp(up)
+                                        .setYaw(yaw)
+                                        .setPitch(pitch);
+
+        if (tinyCam.type == "perspective") {
+            const float zoom = glm::degrees(tinyCam.perspective.yfov);
+            builder = builder.setZoom(zoom);
+        }
+
+        std::println("[INFO] Using gltf provided camera");
+
+        return builder.build();
+    }
+
+    void convertLight(const tinygltf::Light &tinyLight, const glm::mat4 &worldMatrix,
+                      SceneBuilder& sceneBuilder) {
+        glm::vec4 position  = glm::vec4(glm::vec3(worldMatrix[3]), 1.0f);
+        glm::vec4 direction = glm::vec4(-glm::normalize(glm::vec3(worldMatrix[2])), 0.0f);
+        glm::vec4 color     = glm::vec4(
+            tinyLight.color[0],
+            tinyLight.color[1],
+            tinyLight.color[2],
+            1.0f
+        );
+        if (tinyLight.type == "point") {
+            PointLight point = {
+                .position  = position,
+                .color     = color,
+                .intensity = static_cast<float>(tinyLight.intensity),
+                .range     = static_cast<float>(tinyLight.range)
+            };
+            sceneBuilder.pointLight.push_back(point);
+        } else if (tinyLight.type == "spot") {
+            SpotLight spot = {
+                .position       = position,
+                .color          = color,
+                .direction      = direction,
+                .intensity = static_cast<float>(tinyLight.intensity),
+                .range     = static_cast<float>(tinyLight.range),
+                .innerConeAngle = static_cast<float>(tinyLight.spot.innerConeAngle),
+                .outerConeAngle = static_cast<float>(tinyLight.spot.outerConeAngle)
+            };
+            sceneBuilder.spotLight.push_back(spot);
+        } else if (tinyLight.type == "directional") {
+                DirectionalLight directional = {
+                    .color     = color,
+                    .direction = direction,
+                    .intensity = static_cast<float>(tinyLight.intensity),
+                    .range     = static_cast<float>(tinyLight.range)
+                };
+                sceneBuilder.directionalLight.push_back(directional);
+        }
+    }
+
+    void dfsNode(const tinygltf::Model &tinyModel, const tinygltf::Node &tinyNode, const glm::mat4 &parentWorldMatrix,
+                 SceneBuilder& sceneBuilder) {
         const auto worldMatrix = parentWorldMatrix * extractTransformMatrix(tinyNode);
 
         if (tinyNode.mesh != -1) {
             for (auto &tinyPrimitive: tinyModel.meshes[tinyNode.mesh].primitives) {
-                convertTrianglePrimitive(tinyPrimitive, tinyModel, worldMatrix, vertices, triangles);
+                convertTrianglePrimitive(tinyPrimitive, tinyModel, worldMatrix, sceneBuilder);
             }
         }
 
+        if (tinyNode.camera != -1) {
+            const auto tinyCam = tinyModel.cameras[tinyNode.camera];
+            sceneBuilder.camera = convertCamera(tinyCam, worldMatrix);
+        }
+
+        if (tinyNode.light != -1) {
+            const auto tinyLight = tinyModel.lights[tinyNode.light];
+            convertLight(tinyLight, worldMatrix, sceneBuilder);
+        }
+
         for (const int child: tinyNode.children) {
-            dfsNode(tinyModel, vertices, triangles, tinyModel.nodes[child], worldMatrix);
+            dfsNode(tinyModel, tinyModel.nodes[child], worldMatrix, sceneBuilder);
         }
     }
 
@@ -411,7 +482,7 @@ namespace rt {
 
         const auto &pbr = tm.pbrMetallicRoughness;
 
-        PbrMetallicRoughness pbrMetallicRoughness = {
+        const PbrMetallicRoughness pbrMetallicRoughness = {
             .baseColorFactor{
                 static_cast<float>(pbr.baseColorFactor[0]),
                 static_cast<float>(pbr.baseColorFactor[1]),
@@ -430,15 +501,19 @@ namespace rt {
             }
         };
         material.pbrMetallicRoughness = pbrMetallicRoughness;
+        material.emissiveTexture = {
+            .index    = tm.emissiveTexture.index,
+            .texCoord = tm.emissiveTexture.texCoord
+        };
 
         return material;
     }
 
-    Texture convertTexture(const tinygltf::Model &tinyModel, const tinygltf::Texture &tinyTexture) {
+    Texture convertTexture(const std::string& path, const tinygltf::Model &tinyModel, const tinygltf::Texture &tinyTexture) {
         int width, height, channels;
         const auto &tinyImage = tinyModel.images[tinyTexture.source];
         assert(!tinyImage.uri.empty());
-        unsigned char *rawData = stbi_load(("resources/simple_model/" + tinyImage.uri).c_str(), &width, &height,
+        unsigned char *rawData = stbi_load((path + tinyImage.uri).c_str(), &width, &height,
                                            &channels, 4);
 
         assert(width == tinyImage.width);
@@ -534,28 +609,41 @@ namespace rt {
         };
     }
 
-    Scene SceneLoader::loadScene(const std::string &path, const Camera &camera) {
-        auto tinyModel = getGLTFModel(path);
-        constexpr float SCALE = 0.01f;
+    bool hasEmissiveLight(const Triangle& triangle, const std::vector<Material>& materials) {
+        const auto& mat = materials[triangle.material];
+        return mat.emissiveFactor.x > 0 ||
+               mat.emissiveFactor.y > 0 ||
+               mat.emissiveFactor.z > 0 ||
+               mat.emissiveTexture.index != -1;
+    }
+
+    Scene SceneLoader::loadScene(const std::string &path) {
+        auto tinyModel = getGLTFModel(path + "/scene.gltf");
+        constexpr float SCALE = 1.0015f;
         glm::mat4 worldMatrix{1.0f};
         worldMatrix = glm::scale(worldMatrix, glm::vec3(SCALE));
 
-        std::vector<Vertex> vertices;
-        std::vector<Triangle> triangles;
+        SceneBuilder sceneBuilder; 
+
         int defaultScene = tinyModel.defaultScene != -1 ? tinyModel.defaultScene : 0;
         for (const auto &tinyScene = tinyModel.scenes[defaultScene]; int rootNodeIndex: tinyScene.nodes) {
-            dfsNode(tinyModel, vertices, triangles, tinyModel.nodes[rootNodeIndex], worldMatrix);
+            dfsNode(tinyModel, tinyModel.nodes[rootNodeIndex], worldMatrix, sceneBuilder);
         }
 
-        std::vector<Material> materials;
         for (const auto &tinyMaterial: tinyModel.materials) {
-            materials.push_back(convertMaterial(tinyMaterial));
+            sceneBuilder.materials.push_back(convertMaterial(tinyMaterial));
         }
 
-        std::vector<Texture> textures;
         for (const auto &tinyTexture: tinyModel.textures) {
-            textures.push_back(convertTexture(tinyModel, tinyTexture));
+            sceneBuilder.textures.push_back(convertTexture(path, tinyModel, tinyTexture));
         }
-        return {vertices, triangles, materials, textures};
+
+        for (size_t i = 0; i < sceneBuilder.triangles.size(); ++i) {
+            if (hasEmissiveLight(sceneBuilder.triangles[i], sceneBuilder.materials)) {
+                sceneBuilder.emissiveLight.push_back(i);
+            }
+        }
+        
+        return sceneBuilder.build();
     }
 } //rt

@@ -11,20 +11,12 @@ namespace rt {
     RayTracerApplication::RayTracerApplication(const std::string& scenePath, std::unique_ptr<gfx::AccelerationStruct> accelStruct)
         : screenSettings(std::make_unique<ScreenSettings>(WIDTH, HEIGHT, FOV)),
           buffer(std::make_unique<FrameBuffer>(WIDTH, HEIGHT)),
-          renderer(std::make_unique<gfx::Renderer>(std::move(accelStruct))) {
-
-        glm::vec3 modelCenter(0.0f, 0.0f, 0.0f);
-        glm::vec3 cameraPos = modelCenter + glm::vec3(-3.0f, 16.0f, 40.0f);
-        glm::vec3 dir = glm::normalize(modelCenter - cameraPos);
-        float pitch = glm::degrees(asin(dir.y)); 
-        float yaw = glm::degrees(atan2(dir.z, dir.x));
-
-        camera = std::make_unique<Camera>(cameraPos, glm::vec3(0.0f, 1.0f, 0.0f), yaw, pitch, screenSettings->FOV);
-        scene = std::make_unique<Scene>(SceneLoader::loadScene(scenePath, *camera));
+          renderer(std::make_unique<gfx::Renderer>(std::move(accelStruct))),
+          scene(std::make_unique<Scene>(SceneLoader::loadScene(scenePath))) {
     }
 
     void RayTracerApplication::run() {
-        gfx::RendererContext context(&*scene, &*camera, &*screenSettings);
+        gfx::RendererContext context(&*scene, &*screenSettings);
 
         auto start = std::chrono::high_resolution_clock::now();
 

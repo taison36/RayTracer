@@ -63,21 +63,15 @@ function(compileShaderSlang TARGET)
 endfunction()
 
 set(SHADERS
-    ${CMAKE_CURRENT_LIST_DIR}/shaders/checker.slang
-    ${CMAKE_CURRENT_LIST_DIR}/shaders/raytrace.slang
+   ${CMAKE_CURRENT_LIST_DIR}/shaders/main.slang
 )
 
-compileShaderSlang(compileShaders
-    SOURCES ${SHADERS}
-)
+compileShaderSlang(compileShaders SOURCES ${SHADERS})
 
 
 set(TINYGLTF_HEADER_ONLY ON CACHE INTERNAL "" FORCE)
 set(TINYGLTF_INSTALL OFF CACHE INTERNAL "" FORCE)
 
-set(SHADERS
-   ${CMAKE_CURRENT_LIST_DIR}/shaders/checker.comp
-)
 
 add_subdirectory(src)
 
@@ -89,7 +83,6 @@ add_custom_command(TARGET Raytracer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_SOURCE_DIR}/resources $<TARGET_FILE_DIR:Raytracer>/resources
 )
-
 target_include_directories(${PROJECT_NAME} PRIVATE "lib/tinygltf")
 target_include_directories(${PROJECT_NAME} PRIVATE "resources")
 target_link_libraries(${PROJECT_NAME}  PRIVATE Vulkan::Vulkan)

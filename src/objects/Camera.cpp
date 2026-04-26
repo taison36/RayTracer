@@ -3,19 +3,32 @@
 
 namespace rt {
 
-    Camera::Camera(const glm::vec3 &position,
-                    const glm::vec3 &up,
-                    float yaw,
-                    float pitch,
-                    float zoom) : position(position),
-                                  up(up),
-                                  worldUp(up),
-                                  yaw(yaw),
-                                  pitch(pitch),
-                                  zoom(zoom) {
-        updateCameraVectors();
-    };
+    Camera::Camera()
+        : position(DEFAULT_POSITION),
+          worldUp(glm::vec3(0.0f, 1.0f, 0.0f)),
+          zoom(DEFAULT_ZOOM) {
+        glm::vec3 target  = glm::vec3(0.0f);
+        glm::vec3 forward = glm::normalize(target - position);
     
+        pitch = glm::degrees(std::asin(forward.y));
+        yaw   = glm::degrees(std::atan2(forward.z, forward.x));
+    
+        updateCameraVectors();
+    }
+
+    Camera::Camera(const glm::vec3& position,
+                   const glm::vec3& up,
+                   float yaw,
+                   float pitch,
+                   float zoom)
+        : position(position),
+          worldUp(up),
+          yaw(yaw),
+          pitch(pitch),
+          zoom(zoom) {
+        updateCameraVectors();
+    }
+
     void Camera::updateCameraVectors() {
         glm::vec3 newFront;
         newFront.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
@@ -44,7 +57,6 @@ namespace rt {
         float near = 0.1f;
         float far  = 100.0f;
         glm::mat4 proj = glm::perspective(fov, aspectRatio, near, far);
-        proj[1][1] *= -1;
         return proj;
     }
 }

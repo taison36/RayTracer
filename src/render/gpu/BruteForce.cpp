@@ -24,25 +24,30 @@ namespace rt::gfx {
                                0,
                                {*descriptorSets.front()}, 
                                nullptr);
-        cmb.dispatch((WIDTH  + 15)  / 16,
-                     (HEIGHT + 15) / 16,
+        cmb.dispatch((WIDTH  + 7)  / 8,
+                     (HEIGHT + 7) / 8,
                      1);
     }
 
 
     SceneSettings BruteForce::extractSceneSettings(const RendererContext& context) const {
         CameraData cameraData = {
-            .viewInverse = glm::inverse(context.camera->getView()),
-            .projInverse = glm::inverse(context.camera->getProjection(context.screenSettings->IMAGE_ASPECT_RATIO)),
-            .position    = context.camera->getPosition()
+            .viewInverse = glm::inverse(context.scene->camera.getView()),
+            .projInverse = glm::inverse(context.scene->camera.getProjection(context.screenSettings->IMAGE_ASPECT_RATIO)),
+            .position    = context.scene->camera.getPosition()
         };
 
         SceneSettings sceneUBO = {
-            .cameraData      = cameraData,
-            .vertexCount     = static_cast<uint32_t>(context.scene->vertices.size()),
-            .triangleCount   = static_cast<uint32_t>(context.scene->triangles.size()),
-            .maxBounces      = 8,
-            .samplesPerPixel = 4
+            .cameraData              = cameraData,
+            .vertexCount             = static_cast<uint32_t>(context.scene->vertices.size()),
+            .triangleCount           = static_cast<uint32_t>(context.scene->triangles.size()),
+            .emissiveLightCount      = static_cast<uint32_t>(context.scene->emissiveLight.size()),
+            .directionalLightCount   = static_cast<uint32_t>(context.scene->directionalLight.size()),
+            .pointLightCount         = static_cast<uint32_t>(context.scene->pointLight.size()),
+            .spotLightCount          = static_cast<uint32_t>(context.scene->spotLight.size()),
+            .maxBounces              = 4,
+            .samplesPerPixel         = 24,
+            .samplesPerEmissiveLight = 1 
         };
 
         return sceneUBO;
@@ -127,26 +132,59 @@ namespace rt::gfx {
 
     void BruteForce::createBuffers(const VkCore& vkCore, const RendererContext& context) {
         vkCore.createBuffer(
-            context.scene->vertices.size() * sizeof(Vertex),
+            std::max(context.scene->vertices.size() * sizeof(Vertex), sizeof(Vertex)),
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal,
             vertices.buffer,
             vertices.memory
         );
         vkCore.createBuffer(
-            context.scene->triangles.size() * sizeof(Triangle),
+            std::max(context.scene->triangles.size() * sizeof(Triangle), sizeof(Triangle)),
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal,
             triangles.buffer,
             triangles.memory
         );
         vkCore.createBuffer(
-            context.scene->materials.size() * sizeof(Material),
+            std::max(context.scene->materials.size() * sizeof(Material), sizeof(Material)),
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal,
             materials.buffer,
             materials.memory
         );
+
+        vkCore.createBuffer(
+            std::max(context.scene->emissiveLight.size() * sizeof(uint32_t), sizeof(uint32_t)),
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            emissiveLight.buffer,
+            emissiveLight.memory
+        );
+
+        vkCore.createBuffer(
+            std::max(context.scene->directionalLight.size() * sizeof(DirectionalLight), sizeof(DirectionalLight)),
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            directionalLight.buffer,
+            directionalLight.memory
+        );
+
+        vkCore.createBuffer(
+            std::max(context.scene->pointLight.size() * sizeof(PointLight), sizeof(PointLight)),
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            pointLight.buffer,
+            pointLight.memory
+        );
+
+        vkCore.createBuffer(
+            std::max(context.scene->spotLight.size() * sizeof(SpotLight), sizeof(SpotLight)),
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            spotLight.buffer,
+            spotLight.memory
+        );
+
         vkCore.createBuffer(
             sizeof(SceneSettings),
             vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst,
@@ -163,25 +201,60 @@ namespace rt::gfx {
         uint32_t verSize           = align(context.scene->vertices.size()  * sizeof(Vertex)  , 4); 
         uint32_t triSize           = align(context.scene->triangles.size() * sizeof(Triangle), 4);
         uint32_t matSize           = align(context.scene->materials.size() * sizeof(Material), 4);
+        uint32_t emissiveSize      = align(context.scene->emissiveLight.size() * sizeof(uint32_t), 4);
+        uint32_t dirSize           = align(context.scene->directionalLight.size() * sizeof(DirectionalLight), 4);
+        uint32_t pointSize         = align(context.scene->pointLight.size() * sizeof(PointLight), 4);
+        uint32_t spotSize          = align(context.scene->spotLight.size() * sizeof(SpotLight), 4);
         uint32_t sceneSettingsSize = align(sizeof(SceneSettings), 4);
-        uint32_t totalPoolSize     = verSize + triSize + matSize + sceneSettingsSize;
+        uint32_t totalPoolSize     = verSize + triSize + matSize + emissiveSize + dirSize + pointSize + spotSize +sceneSettingsSize;
         uint32_t offset            = 0;
+
         vkCore.createBuffer(totalPoolSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
                             poolBuffer, poolMemory);
         void* mappedPoolMemory = poolMemory.mapMemory(0, totalPoolSize);
         auto commandBuffer = vkCore.beginSingleTimeCommands();
+        
+        if (verSize != 0) {
+            memcpy((char*)mappedPoolMemory + offset, context.scene->vertices.data(), verSize);
+            vkCore.fillBuffer(poolBuffer, vertices.buffer, verSize, offset, *commandBuffer);
+            offset += verSize;
+        }
 
-        memcpy((char*)mappedPoolMemory + offset, context.scene->vertices.data(), verSize);
-        vkCore.fillBuffer(poolBuffer, vertices.buffer, verSize, offset, *commandBuffer);
-        offset += verSize;
+        if (triSize != 0) {
+            memcpy((char*)mappedPoolMemory + offset, context.scene->triangles.data(), triSize);
+            vkCore.fillBuffer(poolBuffer, triangles.buffer, triSize, offset, *commandBuffer);
+            offset += triSize;
+        }
 
-        memcpy((char*)mappedPoolMemory + offset, context.scene->triangles.data(), triSize);
-        vkCore.fillBuffer(poolBuffer, triangles.buffer, triSize, offset, *commandBuffer);
-        offset += triSize;
+        if (matSize != 0) {
+            memcpy((char*)mappedPoolMemory + offset, context.scene->materials.data(), matSize);
+            vkCore.fillBuffer(poolBuffer, materials.buffer, matSize, offset, *commandBuffer);
+            offset += matSize;
+        }
 
-        memcpy((char*)mappedPoolMemory + offset, context.scene->materials.data(), matSize);
-        vkCore.fillBuffer(poolBuffer, materials.buffer, matSize, offset, *commandBuffer);
-        offset += matSize;
+        if (emissiveSize != 0) {
+            memcpy((char*)mappedPoolMemory + offset, context.scene->emissiveLight.data(), emissiveSize);
+            vkCore.fillBuffer(poolBuffer, emissiveLight.buffer, emissiveSize, offset, *commandBuffer);
+            offset += emissiveSize;
+        }
+
+        if (dirSize != 0) {
+            memcpy((char*)mappedPoolMemory + offset, context.scene->directionalLight.data(), dirSize);
+            vkCore.fillBuffer(poolBuffer, directionalLight.buffer, dirSize, offset, *commandBuffer);
+            offset += dirSize;
+        }
+
+        if (pointSize != 0) {
+            memcpy((char*)mappedPoolMemory + offset, context.scene->pointLight.data(), pointSize);
+            vkCore.fillBuffer(poolBuffer, pointLight.buffer, pointSize, offset, *commandBuffer);
+            offset += pointSize;
+        }
+
+        if (spotSize != 0) {
+            memcpy((char*)mappedPoolMemory + offset, context.scene->spotLight.data(), spotSize);
+            vkCore.fillBuffer(poolBuffer, spotLight.buffer, spotSize, offset, *commandBuffer);
+            offset += spotSize;
+        }
 
         memcpy((char*)mappedPoolMemory + offset, &sceneSettings, sceneSettingsSize);
         vkCore.fillBuffer(poolBuffer, sceneSettingsUBO.buffer, sceneSettingsSize, offset, *commandBuffer);
@@ -204,7 +277,10 @@ namespace rt::gfx {
             totalPoolSize     += align(imageSize, 4);
         }
 
-        assert(totalPoolSize != 0);
+        if (totalPoolSize == 0) {
+            return;
+        }
+
 		vkCore.createBuffer(totalPoolSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, poolBuffer, poolMemory);
         void* mappedPoolMemory = poolMemory.mapMemory(0, totalPoolSize);
 
@@ -234,7 +310,7 @@ namespace rt::gfx {
     void BruteForce::createDescriptorPool(const VkCore& vkCore, const RendererContext& context) {
         std::vector<vk::DescriptorPoolSize> poolSizes = {
            vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage,  1),       //outputImage
-           vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 3),       //scene buffers
+           vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 7),       //scene buffers
            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 1),       //sceneSettings buffers
            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_TEXTURE_NUMBER) //bindless textures
         };
@@ -255,11 +331,15 @@ namespace rt::gfx {
             vk::DescriptorSetLayoutBinding{.binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
             vk::DescriptorSetLayoutBinding{.binding = 2, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
             vk::DescriptorSetLayoutBinding{.binding = 3, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
-            vk::DescriptorSetLayoutBinding{.binding = 4, .descriptorType = vk::DescriptorType::eUniformBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
-            vk::DescriptorSetLayoutBinding{.binding = 5, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = MAX_TEXTURE_NUMBER, .stageFlags = vk::ShaderStageFlagBits::eCompute}
+            vk::DescriptorSetLayoutBinding{.binding = 4, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+            vk::DescriptorSetLayoutBinding{.binding = 5, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+            vk::DescriptorSetLayoutBinding{.binding = 6, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+            vk::DescriptorSetLayoutBinding{.binding = 7, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+            vk::DescriptorSetLayoutBinding{.binding = 8, .descriptorType = vk::DescriptorType::eUniformBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+            vk::DescriptorSetLayoutBinding{.binding = 9, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = MAX_TEXTURE_NUMBER, .stageFlags = vk::ShaderStageFlagBits::eCompute}
         };
         std::vector<vk::DescriptorBindingFlags> bindingFlags(static_cast<uint32_t>(layoutBindings.size()));
-        bindingFlags[5] = vk::DescriptorBindingFlagBits::eUpdateAfterBind |
+        bindingFlags[9] = vk::DescriptorBindingFlagBits::eUpdateAfterBind |
                           vk::DescriptorBindingFlagBits::ePartiallyBound  |
                           vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
 
@@ -315,6 +395,26 @@ namespace rt::gfx {
             .offset = 0,
             .range  = VK_WHOLE_SIZE
         };
+        vk::DescriptorBufferInfo emissiveBufferInfo{
+            .buffer = emissiveLight.buffer,
+            .offset = 0,
+            .range  = VK_WHOLE_SIZE
+        };
+        vk::DescriptorBufferInfo dirBufferInfo{
+            .buffer = directionalLight.buffer,
+            .offset = 0,
+            .range  = VK_WHOLE_SIZE
+        };
+        vk::DescriptorBufferInfo pointBufferInfo{
+            .buffer = pointLight.buffer,
+            .offset = 0,
+            .range  = VK_WHOLE_SIZE
+        };
+        vk::DescriptorBufferInfo spotBufferInfo{
+            .buffer = spotLight.buffer,
+            .offset = 0,
+            .range  = VK_WHOLE_SIZE
+        };
         vk::DescriptorBufferInfo sceneSettsBufferInfo{
             .buffer = sceneSettingsUBO.buffer,
             .offset = 0,
@@ -359,6 +459,38 @@ namespace rt::gfx {
                 .dstBinding = 4,
                 .dstArrayElement = 0,
                 .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &emissiveBufferInfo
+            },
+            vk::WriteDescriptorSet {
+                .dstSet = descriptorSets.front(),
+                .dstBinding = 5,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &dirBufferInfo
+            },
+            vk::WriteDescriptorSet {
+                .dstSet = descriptorSets.front(),
+                .dstBinding = 6,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &pointBufferInfo
+            },
+            vk::WriteDescriptorSet {
+                .dstSet = descriptorSets.front(),
+                .dstBinding = 7,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &spotBufferInfo
+            },
+            vk::WriteDescriptorSet {
+                .dstSet = descriptorSets.front(),
+                .dstBinding = 8,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
                 .descriptorType = vk::DescriptorType::eUniformBuffer,
                 .pBufferInfo = &sceneSettsBufferInfo
             }
@@ -380,20 +512,17 @@ namespace rt::gfx {
 
         vk::WriteDescriptorSet write {
             .dstSet = descriptorSets.front(),
-            .dstBinding = 5,
+            .dstBinding = 9,
             .dstArrayElement = 0,
             .descriptorCount = static_cast<uint32_t>(texturesInfos.size()),
             .descriptorType = vk::DescriptorType::eCombinedImageSampler,
             .pImageInfo = texturesInfos.data()
         };
         vkCore.getDevice().updateDescriptorSets(write, {});
-
-        for (int i = 0; i < 1000*1000*1000; ++i) {
-        }
     }
 
     void BruteForce::createPipeline(const VkCore& vkCore){
-       vk::raii::ShaderModule shaderModule = vkCore.createShaderModule(readFile("shaders/raytrace.spv"));
+        vk::raii::ShaderModule shaderModule = vkCore.createShaderModule(readFile("shaders/main.spv"));
         vk::PipelineShaderStageCreateInfo shaderStageInfo{
             .stage = vk::ShaderStageFlagBits::eCompute,
             .module = shaderModule,

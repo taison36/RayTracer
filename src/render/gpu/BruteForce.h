@@ -15,12 +15,23 @@ namespace rt::gfx {
         glm::vec3 position;
         float     _pad0;
     };
+
     struct alignas(16) SceneSettings {
         CameraData cameraData;
+
         uint32_t vertexCount;
         uint32_t triangleCount;
+
+        uint32_t emissiveLightCount;
+        uint32_t directionalLightCount;
+        uint32_t pointLightCount;
+        uint32_t spotLightCount;
+
         uint32_t maxBounces;
         uint32_t samplesPerPixel;
+        uint32_t samplesPerEmissiveLight;
+
+        glm::uvec3 _pad0;                   // 12 bytes, offset 180
     };
 
     struct Buffer {
@@ -48,7 +59,14 @@ namespace rt::gfx {
         Buffer vertices;
         Buffer triangles;
         Buffer materials;
+
+        Buffer emissiveLight;
+        Buffer directionalLight;
+        Buffer pointLight;
+        Buffer spotLight;
+
         Buffer sceneSettingsUBO;
+
         std::vector<TextureImage> textures;
 
         SceneSettings extractSceneSettings(const RendererContext& context) const;
