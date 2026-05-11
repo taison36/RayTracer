@@ -46,7 +46,7 @@ namespace rt::gfx {
             .pointLightCount         = static_cast<uint32_t>(context.scene->pointLight.size()),
             .spotLightCount          = static_cast<uint32_t>(context.scene->spotLight.size()),
             .maxBounces              = 4,
-            .samplesPerPixel         = 24,
+            .samplesPerPixel         = 200,
             .samplesPerEmissiveLight = 1 
         };
 

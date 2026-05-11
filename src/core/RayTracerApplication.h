@@ -5,8 +5,8 @@
 #include <memory>
 
 namespace rt {
-    static constexpr uint32_t WIDTH  = 1024;
-    static constexpr uint32_t HEIGHT = 768;
+    static constexpr uint32_t WIDTH  = 800;
+    static constexpr uint32_t HEIGHT = 600;
     static constexpr int FOV    = 60.0f;
 
     class RayTracerApplication {

@@ -357,27 +357,33 @@ float4 ray_color(Ray r, inout RNG rng) {
         HitInfo hit = traceScene(r);
         if (hit.hit) {
             // Add emissive contribution
-            //Material mat = materials[hit.materialIndex];
-            //float3 emitted = mat.emissiveFactor.rgb;
-            //pixelColor += throughput * emitted;
+            Material mat = materials[hit.materialIndex];
+            float3 emittedColor = mat.emissiveFactor.rgb;
 
             Ray scattered;
             float3 attenuation;
+
             if (scatter(r, hit, rng, attenuation, scattered)) {
-                r = scattered;
+                pixelColor += throughput * emittedColor;
+
+                // Update throughput for NEXT bounce
                 throughput *= attenuation;
+                r = scattered;
             } else {
+                // Still add emission when scatter fails
+                pixelColor += throughput * emittedColor;
                 break;
             }
         }
         else {
-            // Ray missed or hit background triangle - return sky color
-            float3 unitDir = normalize(r.direction);
-            float a = 0.5 * (unitDir.y + 1.0);
-            float3 sky = (1.0 - a) * float3(1.0, 1.0, 1.0) 
-                       + a * float3(0.5, 0.7, 1.0);
-            
-            pixelColor += throughput * sky;
+            //// Ray missed or hit background triangle - return sky color
+            //float3 unitDir = normalize(r.direction);
+            //float a = 0.5 * (unitDir.y + 1.0);
+            //float3 sky = (1.0 - a) * float3(1.0, 1.0, 1.0)
+            //           + a * float3(0.5, 0.7, 1.0);
+            //
+            //pixelColor += throughput * sky;
+            pixelColor += throughput * float3(0.70, 0.80, 1.00);
             break;
         }
     }
