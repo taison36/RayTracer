@@ -10,21 +10,41 @@ namespace rt::gfx {
     void Renderer::run(const RendererContext& context, FrameBuffer& fb) {
         auto outputImage = createOutputImage(context);
 
-        const auto cmd = vkCore.beginSingleTimeCommands();
+        accelStruct->build(vkCore, context, outputImage);
 
-        accelStruct->build(vkCore, context, outputImage); 
-        accelStruct->record(*cmd, context.screenSettings->WIDTH, context.screenSettings->HEIGHT);
+        // Split work into tiles to avoid macOS Metal GPU watchdog timeout (~5s limit).
+        // Each tile × sample is a separate command buffer submission.
+        constexpr uint32_t TILE_SIZE  = 64;
+        const uint32_t     WIDTH      = context.screenSettings->WIDTH;
+        const uint32_t     HEIGHT     = context.screenSettings->HEIGHT;
+        const uint32_t     totalSamples = accelStruct->getSamplesPerPixel();
+        const uint32_t     tilesX     = (WIDTH  + TILE_SIZE - 1) / TILE_SIZE;
+        const uint32_t     tilesY     = (HEIGHT + TILE_SIZE - 1) / TILE_SIZE;
+
+        for (uint32_t s = 0; s < totalSamples; ++s) {
+            for (uint32_t ty = 0; ty < tilesY; ++ty) {
+                for (uint32_t tx = 0; tx < tilesX; ++tx) {
+                    const auto cmd = vkCore.beginSingleTimeCommands();
+                    accelStruct->record(*cmd, TILE_SIZE, TILE_SIZE, s, tx * TILE_SIZE, ty * TILE_SIZE);
+                    vkCore.endSingleTimeCommands(*cmd);
+                }
+            }
+        }
 
         vk::DeviceSize imageSize = context.screenSettings->HEIGHT * context.screenSettings->WIDTH * 4;
         vk::raii::Buffer stagingBuffer({});
         vk::raii::DeviceMemory stagingBufferMemory({});
 
         vkCore.createBuffer(imageSize, vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, stagingBuffer, stagingBufferMemory);
-        vkCore.transitionImageLayout(outputImage.image, vk::ImageLayout::eGeneral , vk::ImageLayout::eTransferSrcOptimal, *cmd);
-        vkCore.endSingleTimeCommands(*cmd);
+
+        {
+            const auto cmd = vkCore.beginSingleTimeCommands();
+            vkCore.transitionImageLayout(outputImage.image, vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal, *cmd);
+            vkCore.endSingleTimeCommands(*cmd);
+        }
 
         vkCore.copyImageToBuffer(outputImage.image, stagingBuffer, context.screenSettings->HEIGHT, context.screenSettings->WIDTH);
-    
+
         void* data = stagingBufferMemory.mapMemory(0, imageSize);
         saveToFrameBuffer(data, fb);
         stagingBufferMemory.unmapMemory();
