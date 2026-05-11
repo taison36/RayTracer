@@ -17,15 +17,22 @@ namespace rt::gfx {
         createPipeline(vkCore);
     }
 
-    void BruteForce::record(const vk::CommandBuffer& cmb, const uint32_t WIDTH, const uint32_t HEIGHT) {
+    void BruteForce::record(const vk::CommandBuffer& cmb,
+                            const uint32_t tileWidth, const uint32_t tileHeight,
+                            const uint32_t sampleIndex,
+                            const uint32_t tileOffsetX, const uint32_t tileOffsetY) {
+        struct PushConstants { uint32_t sampleIndex, tileOffsetX, tileOffsetY; };
+        PushConstants pc{ sampleIndex, tileOffsetX, tileOffsetY };
+
         cmb.bindPipeline(vk::PipelineBindPoint::eCompute, *pipeline);
         cmb.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
                                pipelineLayout,
                                0,
-                               {*descriptorSets.front()}, 
+                               {*descriptorSets.front()},
                                nullptr);
-        cmb.dispatch((WIDTH  + 7)  / 8,
-                     (HEIGHT + 7) / 8,
+        cmb.pushConstants(*pipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
+        cmb.dispatch((tileWidth  + 7) / 8,
+                     (tileHeight + 7) / 8,
                      1);
     }
 
@@ -45,8 +52,8 @@ namespace rt::gfx {
             .directionalLightCount   = static_cast<uint32_t>(context.scene->directionalLight.size()),
             .pointLightCount         = static_cast<uint32_t>(context.scene->pointLight.size()),
             .spotLightCount          = static_cast<uint32_t>(context.scene->spotLight.size()),
-            .maxBounces              = 4,
-            .samplesPerPixel         = 200,
+            .maxBounces              = 8,
+            .samplesPerPixel         = 30,
             .samplesPerEmissiveLight = 1 
         };
 
@@ -192,6 +199,15 @@ namespace rt::gfx {
             sceneSettingsUBO.buffer,
             sceneSettingsUBO.memory
         );
+
+        vk::DeviceSize accumBufferSize = context.screenSettings->WIDTH * context.screenSettings->HEIGHT * sizeof(float) * 4;
+        vkCore.createBuffer(
+            accumBufferSize,
+            vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            accumBuffer.buffer,
+            accumBuffer.memory
+        );
     }
 
 
@@ -310,7 +326,7 @@ namespace rt::gfx {
     void BruteForce::createDescriptorPool(const VkCore& vkCore, const RendererContext& context) {
         std::vector<vk::DescriptorPoolSize> poolSizes = {
            vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage,  1),       //outputImage
-           vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 7),       //scene buffers
+           vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 8),       //scene buffers + accumBuffer
            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 1),       //sceneSettings buffers
            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_TEXTURE_NUMBER) //bindless textures
         };
@@ -335,13 +351,15 @@ namespace rt::gfx {
             vk::DescriptorSetLayoutBinding{.binding = 5, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
             vk::DescriptorSetLayoutBinding{.binding = 6, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
             vk::DescriptorSetLayoutBinding{.binding = 7, .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
-            vk::DescriptorSetLayoutBinding{.binding = 8, .descriptorType = vk::DescriptorType::eUniformBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
-            vk::DescriptorSetLayoutBinding{.binding = 9, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = MAX_TEXTURE_NUMBER, .stageFlags = vk::ShaderStageFlagBits::eCompute}
+            vk::DescriptorSetLayoutBinding{.binding = 8,  .descriptorType = vk::DescriptorType::eUniformBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+            vk::DescriptorSetLayoutBinding{.binding = 9,  .descriptorType = vk::DescriptorType::eStorageBuffer       , .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+            vk::DescriptorSetLayoutBinding{.binding = 10, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = MAX_TEXTURE_NUMBER, .stageFlags = vk::ShaderStageFlagBits::eCompute}
         };
         std::vector<vk::DescriptorBindingFlags> bindingFlags(static_cast<uint32_t>(layoutBindings.size()));
-        bindingFlags[9] = vk::DescriptorBindingFlagBits::eUpdateAfterBind |
-                          vk::DescriptorBindingFlagBits::ePartiallyBound  |
-                          vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+        // eVariableDescriptorCount must be on the highest-numbered binding (binding 10 = textures)
+        bindingFlags[10] = vk::DescriptorBindingFlagBits::eUpdateAfterBind |
+                           vk::DescriptorBindingFlagBits::ePartiallyBound  |
+                           vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
 
         vk::DescriptorSetLayoutBindingFlagsCreateInfo flagsCreateInfo {
             .pBindingFlags = bindingFlags.data(),
@@ -420,6 +438,11 @@ namespace rt::gfx {
             .offset = 0,
             .range  = VK_WHOLE_SIZE
         };
+        vk::DescriptorBufferInfo accumBufferInfo{
+            .buffer = accumBuffer.buffer,
+            .offset = 0,
+            .range  = VK_WHOLE_SIZE
+        };
 
         std::vector<vk::WriteDescriptorSet> writes{
             vk::WriteDescriptorSet {
@@ -493,6 +516,14 @@ namespace rt::gfx {
                 .descriptorCount = 1,
                 .descriptorType = vk::DescriptorType::eUniformBuffer,
                 .pBufferInfo = &sceneSettsBufferInfo
+            },
+            vk::WriteDescriptorSet {
+                .dstSet = descriptorSets.front(),
+                .dstBinding = 9,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &accumBufferInfo
             }
         };
 
@@ -512,7 +543,7 @@ namespace rt::gfx {
 
         vk::WriteDescriptorSet write {
             .dstSet = descriptorSets.front(),
-            .dstBinding = 9,
+            .dstBinding = 10,
             .dstArrayElement = 0,
             .descriptorCount = static_cast<uint32_t>(texturesInfos.size()),
             .descriptorType = vk::DescriptorType::eCombinedImageSampler,
@@ -528,10 +559,17 @@ namespace rt::gfx {
             .module = shaderModule,
             .pName = "computeMain"
         };
+        vk::PushConstantRange pushConstantRange{
+            .stageFlags = vk::ShaderStageFlagBits::eCompute,
+            .offset     = 0,
+            .size       = 3 * sizeof(uint32_t)  // sampleIndex, tileOffsetX, tileOffsetY
+        };
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
-            .flags = {},
-            .setLayoutCount = 1,
-            .pSetLayouts = &*descriptorSetLayout
+            .flags                  = {},
+            .setLayoutCount         = 1,
+            .pSetLayouts            = &*descriptorSetLayout,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges    = &pushConstantRange
         };
         pipelineLayout = vk::raii::PipelineLayout(vkCore.getDevice(), pipelineLayoutInfo );
         vk::ComputePipelineCreateInfo pipelineInfo{.flags = {},

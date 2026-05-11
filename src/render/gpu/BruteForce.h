@@ -66,6 +66,7 @@ namespace rt::gfx {
         Buffer spotLight;
 
         Buffer sceneSettingsUBO;
+        Buffer accumBuffer;
 
         std::vector<TextureImage> textures;
 
@@ -83,6 +84,8 @@ namespace rt::gfx {
     public:
         BruteForce() = default;
         void build(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage) override;
-        void record(const vk::CommandBuffer& cmb, const uint32_t WIDTH, const uint32_t HEIGHT) override;
+        void record(const vk::CommandBuffer& cmb, uint32_t tileWidth, uint32_t tileHeight,
+                    uint32_t sampleIndex, uint32_t tileOffsetX, uint32_t tileOffsetY) override;
+        uint32_t getSamplesPerPixel() const override { return sceneSettings.samplesPerPixel; }
     };
 }// rt::gfx

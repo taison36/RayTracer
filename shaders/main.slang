@@ -96,7 +96,15 @@ struct SceneSettings {
 [vk::binding(6, 0)] StructuredBuffer<PointLight>       pointLight;
 [vk::binding(7, 0)] StructuredBuffer<SpotLight>        spotLight;
 [vk::binding(8, 0)] ConstantBuffer<SceneSettings>      scene;
-[vk::binding(9, 0)] Sampler2D                          textures[];
+[vk::binding(9, 0)] RWStructuredBuffer<float4>         accumBuffer;
+[vk::binding(10, 0)] Sampler2D                         textures[];
+
+struct PushConstants {
+    uint sampleIndex;
+    uint tileOffsetX;
+    uint tileOffsetY;
+};
+[[vk::push_constant]] PushConstants pushConsts;
 
 static const float FUZZ = 0;
 static const float EPS = 0.001;
@@ -394,25 +402,33 @@ float4 ray_color(Ray r, inout RNG rng) {
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
-    uint2 pixelCoord = dispatchThreadID.xy;
     uint2 dimensions;
     outputImage.GetDimensions(dimensions.x, dimensions.y);
-    
+
+    uint2 pixelCoord = dispatchThreadID.xy + uint2(pushConsts.tileOffsetX, pushConsts.tileOffsetY);
+
     if (pixelCoord.x >= dimensions.x || pixelCoord.y >= dimensions.y)
         return;
 
-    float4 color = float4(0, 0, 0, 0);
-    for (int i = 0; i < scene.samplesPerPixel; ++i) {
-        RNG rng;
-        rng_init(rng, pixelCoord, i); 
-        Ray ray = generateEyeRay(pixelCoord, dimensions, rng);
-        color += ray_color(ray, rng);
+    uint pixelIndex = pixelCoord.y * dimensions.x + pixelCoord.x;
+
+    RNG rng;
+    rng_init(rng, pixelCoord, pushConsts.sampleIndex);
+    Ray ray = generateEyeRay(pixelCoord, dimensions, rng);
+    float4 color = ray_color(ray, rng);
+
+    if (pushConsts.sampleIndex == 0) {
+        accumBuffer[pixelIndex] = color;
+    } else {
+        accumBuffer[pixelIndex] += color;
     }
-    
-    color = color / scene.samplesPerPixel;
-    color.x = linear_to_gamma(color.x);
-    color.y = linear_to_gamma(color.y);
-    color.z = linear_to_gamma(color.z);
-    
-    outputImage[pixelCoord] = color;
+
+    // On the last sample, normalize and write final gamma-corrected result
+    if (pushConsts.sampleIndex == scene.samplesPerPixel - 1) {
+        float4 finalColor = accumBuffer[pixelIndex] / float(scene.samplesPerPixel);
+        finalColor.x = linear_to_gamma(finalColor.x);
+        finalColor.y = linear_to_gamma(finalColor.y);
+        finalColor.z = linear_to_gamma(finalColor.z);
+        outputImage[pixelCoord] = finalColor;
+    }
 }

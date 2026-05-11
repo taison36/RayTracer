@@ -9,15 +9,16 @@ namespace rt::gfx {
         createPipeline(vkCore);
     }
 
-    void Checker::record(const vk::CommandBuffer& cmb, const uint32_t WIDTH, const uint32_t HEIGHT) {
+    void Checker::record(const vk::CommandBuffer& cmb, const uint32_t tileWidth, const uint32_t tileHeight,
+                         const uint32_t /*sampleIndex*/, const uint32_t /*tileOffsetX*/, const uint32_t /*tileOffsetY*/) {
         cmb.bindPipeline(vk::PipelineBindPoint::eCompute, *pipeline);
         cmb.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
                                pipelineLayout,
                                0,
-                               {*descriptorSets.front()}, 
+                               {*descriptorSets.front()},
                                nullptr);
-        cmb.dispatch((WIDTH  + 15)  / 16,
-                     (HEIGHT + 15) / 16,
+        cmb.dispatch((tileWidth  + 15) / 16,
+                     (tileHeight + 15) / 16,
                      1);
     }
 
