@@ -12,6 +12,7 @@ namespace rt::gfx {
         virtual void record(const vk::CommandBuffer&, uint32_t tileWidth, uint32_t tileHeight,
                             uint32_t sampleIndex, uint32_t tileOffsetX, uint32_t tileOffsetY) = 0;
         virtual uint32_t getSamplesPerPixel() const = 0;
+        virtual const std::string getTypeName() const = 0;
 
         virtual ~AccelerationStruct() = default;
         AccelerationStruct() = default;
