@@ -1,3 +1,5 @@
+// BVH accelerated ray tracer.
+
 struct Vertex {
     float4 position;
     float4 normal;
@@ -11,7 +13,7 @@ struct Triangle {
 };
 
 struct TextureInfo {
-    int  index;    
+    int  index;
     int  texCoordSet;
     int2 pad_0;
 };
@@ -19,18 +21,18 @@ struct TextureInfo {
 struct PbrMetallicRoughness {
     float4      baseColorFactor;
     TextureInfo baseColorTexture;
-    float       metallicFactor; 
+    float       metallicFactor;
     float       roughnessFactor;
-    float2      _pad0;           
+    float2      _pad0;
 
     TextureInfo metallicRoughnessTexture;
-    float4      _pad1; 
+    float4      _pad1;
 };
 
 struct Material {
-    float4               emissiveFactor; 
-    PbrMetallicRoughness pbr;           
-    TextureInfo          emissiveTexture; 
+    float4               emissiveFactor;
+    PbrMetallicRoughness pbr;
+    TextureInfo          emissiveTexture;
 };
 
 struct DirectionalLight {
@@ -86,18 +88,30 @@ struct SceneSettings {
     uint3 pad_0;
 };
 
+// Each node packs the AABB and two uint fields into two float4s.
+// aabbMinLeft.xyz  = AABB min corner
+// aabbMinLeft.w    = asuint → leftFirst  (leaf: first index in bvhTriIndices;
+//                                         internal: left child index, right = leftFirst+1)
+// aabbMaxCount.xyz = AABB max corner
+// aabbMaxCount.w   = asuint → triCount   (0 = internal node, >0 = leaf)
+struct BVHNode {
+    float4 aabbMinLeft;
+    float4 aabbMaxCount;
+};
 
-[vk::binding(0, 0)] RWTexture2D<float4>                outputImage;
-[vk::binding(1, 0)] StructuredBuffer<Vertex>           vertices;
-[vk::binding(2, 0)] StructuredBuffer<Triangle>         triangles;
-[vk::binding(3, 0)] StructuredBuffer<Material>         materials;
-[vk::binding(4, 0)] StructuredBuffer<uint>             emissiveLight;
-[vk::binding(5, 0)] StructuredBuffer<DirectionalLight> directionalLight;
-[vk::binding(6, 0)] StructuredBuffer<PointLight>       pointLight;
-[vk::binding(7, 0)] StructuredBuffer<SpotLight>        spotLight;
-[vk::binding(8, 0)] ConstantBuffer<SceneSettings>      scene;
-[vk::binding(9, 0)] RWStructuredBuffer<float4>         accumBuffer;
-[vk::binding(10, 0)] Sampler2D                         textures[];
+[vk::binding(0, 0)]  RWTexture2D<float4>                outputImage;
+[vk::binding(1, 0)]  StructuredBuffer<Vertex>           vertices;
+[vk::binding(2, 0)]  StructuredBuffer<Triangle>         triangles;
+[vk::binding(3, 0)]  StructuredBuffer<Material>         materials;
+[vk::binding(4, 0)]  StructuredBuffer<uint>             emissiveLight;
+[vk::binding(5, 0)]  StructuredBuffer<DirectionalLight> directionalLight;
+[vk::binding(6, 0)]  StructuredBuffer<PointLight>       pointLight;
+[vk::binding(7, 0)]  StructuredBuffer<SpotLight>        spotLight;
+[vk::binding(8, 0)]  ConstantBuffer<SceneSettings>      scene;
+[vk::binding(9, 0)]  RWStructuredBuffer<float4>         accumBuffer;
+[vk::binding(10, 0)] StructuredBuffer<BVHNode>          bvhNodes;
+[vk::binding(11, 0)] StructuredBuffer<uint>             bvhTriIndices;
+[vk::binding(12, 0)] Sampler2D                          textures[];
 
 struct PushConstants {
     uint sampleIndex;
@@ -130,7 +144,6 @@ struct HitInfo {
     bool   front_face;
 };
 
-// util functions
 float4 getBaseColor(Material mat, HitInfo hit) {
     float4 baseColor = mat.pbr.baseColorFactor;
     if (mat.pbr.baseColorTexture.index >= 0) {
@@ -198,7 +211,7 @@ float3 rng_next3(inout RNG rng) {
 
 float3 random_unit_vector(inout RNG rng) {
     while (true) {
-        float3 p = rng_next3(rng) * 2.0 - 1.0; // [0,1] -> [-1,1]
+        float3 p = rng_next3(rng) * 2.0 - 1.0;
         float lensq = dot(p, p);
 
         if (lensq > 1e-6 && lensq <= 1.0)
@@ -225,103 +238,137 @@ void set_face_normal(Ray r, inout HitInfo hitInfo) {
 Ray generateEyeRay(uint2 pixelCoord, uint2 dimensions, inout RNG rng) {
     float2 uv = (float2(pixelCoord) + rng_next2(rng)) / float2(dimensions);
     uv = uv * 2.0 - 1.0;
-    
+
     float4 target = mul(scene.camera.projInverse, float4(uv.x, -uv.y, 1, 1));
     float4 direction = mul(scene.camera.viewInverse, float4(normalize(target.xyz / target.w), 0));
-    
+
     Ray ray;
     ray.origin = scene.camera.position;
     ray.direction = normalize(direction.xyz);
-    
+
     return ray;
 }
 
 bool intersectTriangle(Ray ray, Triangle tri, out float t, out float2 barycentrics) {
     t = 0;
     barycentrics = 0;
-    
+
     Vertex v0 = vertices[tri.indices[0]];
     Vertex v1 = vertices[tri.indices[1]];
     Vertex v2 = vertices[tri.indices[2]];
-    
+
     float3 edge1 = v1.position.xyz - v0.position.xyz;
     float3 edge2 = v2.position.xyz - v0.position.xyz;
-    
+
     float3 h = cross(ray.direction, edge2);
     float a = dot(edge1, h);
-    
+
     if (abs(a) < 1e-8)
         return false;
-    
+
     float f = 1.0 / a;
     float3 s = ray.origin - v0.position.xyz;
     float u = f * dot(s, h);
-    
+
     if (u < 0.0 || u > 1.0)
         return false;
-    
+
     float3 q = cross(s, edge1);
     float v = f * dot(ray.direction, q);
-    
+
     if (v < 0.0 || u + v > 1.0)
         return false;
-    
+
     t = f * dot(edge2, q);
-    
+
     if (t < 1e-6)
         return false;
-    
+
     barycentrics = float2(u, v);
     return true;
+}
+
+// ── AABB slab test ────────────────────────────────────────────────────────────
+// Returns true if ray hits [bmin, bmax] before tMax.
+bool intersectAABB(Ray ray, float3 bmin, float3 bmax, float tMax) {
+    float3 invDir = 1.0 / ray.direction;
+    float3 t0     = (bmin - ray.origin) * invDir;
+    float3 t1     = (bmax - ray.origin) * invDir;
+    float  tNear  = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+    float  tFar   = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+    return tNear <= tFar && tFar > 0.0 && tNear < tMax;
+}
+
+// Fill HitInfo after a confirmed triangle hit.
+void resolveHit(uint triIdx, float t, float2 bary, Ray ray, inout HitInfo hit) {
+    Triangle tri = triangles[triIdx];
+    Vertex   v0  = vertices[tri.indices[0]];
+    Vertex   v1  = vertices[tri.indices[1]];
+    Vertex   v2  = vertices[tri.indices[2]];
+
+    float w = 1.0 - bary.x - bary.y;
+
+    hit.normal = normalize(
+        v0.normal.xyz * w +
+        v1.normal.xyz * bary.x +
+        v2.normal.xyz * bary.y
+    );
+    set_face_normal(ray, hit);
+
+    hit.hit           = true;
+    hit.t             = t;
+    hit.position      = ray.origin + ray.direction * t;
+    hit.materialIndex = tri.material;
+
+    Material mat = materials[hit.materialIndex];
+    hit.texCoord =
+        v0.texCoord[mat.pbr.baseColorTexture.texCoordSet].xy * w +
+        v1.texCoord[mat.pbr.baseColorTexture.texCoordSet].xy * bary.x +
+        v2.texCoord[mat.pbr.baseColorTexture.texCoordSet].xy * bary.y;
+
+    if (mat.pbr.metallicRoughnessTexture.index >= 0) {
+        hit.mrCoord =
+            v0.texCoord[mat.pbr.metallicRoughnessTexture.texCoordSet].xy * w +
+            v1.texCoord[mat.pbr.metallicRoughnessTexture.texCoordSet].xy * bary.x +
+            v2.texCoord[mat.pbr.metallicRoughnessTexture.texCoordSet].xy * bary.y;
+    }
 }
 
 HitInfo traceScene(inout Ray ray) {
     HitInfo hit;
     hit.hit = false;
-    hit.t = 1e10;
-    
-    for (uint i = 0; i < scene.triangleCount; i++) {
-        float t;
-        float2 barycentrics;
-        
-        if (intersectTriangle(ray, triangles[i], t, barycentrics) && t < hit.t) {
-            Triangle tri = triangles[i];
-            
-            Vertex v0 = vertices[tri.indices[0]];
-            Vertex v1 = vertices[tri.indices[1]];
-            Vertex v2 = vertices[tri.indices[2]];
-            
-            float w = 1.0 - barycentrics.x - barycentrics.y;
-            
-            // Interpolate normal
-            hit.normal = normalize(
-                v0.normal.xyz * w +
-                v1.normal.xyz * barycentrics.x +
-                v2.normal.xyz * barycentrics.y
-            );
-            
-            set_face_normal(ray, hit);
+    hit.t   = 1e10;
 
-            hit.hit = true;
-            hit.t = t;
-            hit.position = ray.origin + ray.direction * t;
-            hit.materialIndex = tri.material;
-            Material mat = materials[hit.materialIndex];
-            
-            hit.texCoord = 
-                v0.texCoord[mat.pbr.baseColorTexture.texCoordSet].xy * w +
-                v1.texCoord[mat.pbr.baseColorTexture.texCoordSet].xy * barycentrics.x +
-                v2.texCoord[mat.pbr.baseColorTexture.texCoordSet].xy * barycentrics.y;
+    uint stack[64];
+    int  top  = 0;
+    stack[0]  = 0; // root
 
-            if (mat.pbr.metallicRoughnessTexture.index >= 0) {
-                hit.mrCoord= 
-                    v0.texCoord[mat.pbr.metallicRoughnessTexture.texCoordSet].xy * w +
-                    v1.texCoord[mat.pbr.metallicRoughnessTexture.texCoordSet].xy * barycentrics.x +
-                    v2.texCoord[mat.pbr.metallicRoughnessTexture.texCoordSet].xy * barycentrics.y;
+    while (top >= 0) {
+        BVHNode node     = bvhNodes[stack[top--]];
+        uint    leftFirst = asuint(node.aabbMinLeft.w);
+        uint    triCount  = asuint(node.aabbMaxCount.w);
+
+        if (!intersectAABB(ray, node.aabbMinLeft.xyz, node.aabbMaxCount.xyz, hit.t))
+            continue;
+
+        if (triCount > 0u) {
+            // Leaf: test every primitive
+            for (uint i = 0u; i < triCount; i++) {
+                uint   triIdx = bvhTriIndices[leftFirst + i];
+                float  t;
+                float2 bary;
+                if (intersectTriangle(ray, triangles[triIdx], t, bary) && t < hit.t)
+                    resolveHit(triIdx, t, bary, ray, hit);
+            }
+        } else {
+            // Internal: push both children (right child = leftFirst + 1)
+            if (top < 62) {
+                stack[++top] = leftFirst;
+                stack[++top] = leftFirst + 1u;
             }
         }
     }
-    
+
     return hit;
 }
 
@@ -359,20 +406,40 @@ bool scatter(Ray r_in, HitInfo hit, inout RNG rng, inout float3 attenuation, ino
     }
 }
 
-// Returns true if the shadow ray from origin toward dir is blocked before maxDist,
-// ignoring triangle skipTriIdx (the sampled light triangle itself).
+// ── BVH shadow ray (any-hit, returns early) ───────────────────────────────────
 bool isOccluded(float3 origin, float3 dir, float maxDist, uint skipTriIdx) {
     Ray shadowRay;
     shadowRay.origin    = origin;
     shadowRay.direction = dir;
 
-    for (uint i = 0; i < scene.triangleCount; i++) {
-        if (i == skipTriIdx)
+    uint stack[64];
+    int  top = 0;
+    stack[0] = 0;
+
+    while (top >= 0) {
+        BVHNode node      = bvhNodes[stack[top--]];
+        uint    leftFirst = asuint(node.aabbMinLeft.w);
+        uint    triCount  = asuint(node.aabbMaxCount.w);
+
+        if (!intersectAABB(shadowRay, node.aabbMinLeft.xyz, node.aabbMaxCount.xyz, maxDist))
             continue;
-        float  t;
-        float2 bc;
-        if (intersectTriangle(shadowRay, triangles[i], t, bc) && t < maxDist - 1e-4)
-            return true;
+
+        if (triCount > 0u) {
+            for (uint i = 0u; i < triCount; i++) {
+                uint triIdx = bvhTriIndices[leftFirst + i];
+                if (triIdx == skipTriIdx)
+                    continue;
+                float  t;
+                float2 bc;
+                if (intersectTriangle(shadowRay, triangles[triIdx], t, bc) && t < maxDist - 1e-4)
+                    return true;
+            }
+        } else {
+            if (top < 62) {
+                stack[++top] = leftFirst;
+                stack[++top] = leftFirst + 1u;
+            }
+        }
     }
     return false;
 }
@@ -401,7 +468,6 @@ float3 sampleEmissiveTriangle(uint listIdx, inout RNG rng, out float3 lightNorma
 
 // Direct light sampling (NEE) contribution at a diffuse hit point
 float3 estimateDirect(HitInfo hit, Material mat, inout RNG rng) {
-    // Pick one emissive triangle uniformly at random
     uint  lightIdx = min(uint(rng_next(rng) * float(scene.emissiveLightCount)), scene.emissiveLightCount - 1);
 
     float3 lightNormal;
@@ -412,25 +478,21 @@ float3 estimateDirect(HitInfo hit, Material mat, inout RNG rng) {
     float  dist       = length(toLight);
     float3 toLightDir = toLight / dist;
 
-    float cosTheta      = dot(hit.normal,   toLightDir);  // surface facing light
-    float cosThetaLight = abs(dot(lightNormal, toLightDir));  // light facing surface (both sides)
+    float cosTheta      = dot(hit.normal,   toLightDir);
+    float cosThetaLight = abs(dot(lightNormal, toLightDir));
 
     if (cosTheta <= 0.0)
         return float3(0.0, 0.0, 0.0);
 
-    uint     lightTriIdx = emissiveLight[lightIdx];
+    uint   lightTriIdx  = emissiveLight[lightIdx];
     float3 shadowOrigin = hit.position + hit.normal * 1e-4;
     if (isOccluded(shadowOrigin, toLightDir, dist, lightTriIdx))
         return float3(0.0, 0.0, 0.0);
-    Material lightMat    = materials[triangles[lightTriIdx].material];
-    float3   Le          = lightMat.emissiveFactor.rgb;
 
-    // Lambertian BRDF = albedo / PI
-    float3 albedo = getBaseColor(mat, hit).xyz;
-
-    // Solid-angle PDF for the sampled point: dist^2 / (area * cosThetaLight)
-    // Combined with uniform light selection: multiply pdf by 1/emissiveLightCount
-    float pdf = (dist * dist) / (area * cosThetaLight * float(scene.emissiveLightCount));
+    Material lightMat = materials[triangles[lightTriIdx].material];
+    float3   Le       = lightMat.emissiveFactor.rgb;
+    float3   albedo   = getBaseColor(mat, hit).xyz;
+    float    pdf      = (dist * dist) / (area * cosThetaLight * float(scene.emissiveLightCount));
 
     return Le * (albedo / PI) * cosTheta / pdf;
 }
@@ -438,23 +500,19 @@ float3 estimateDirect(HitInfo hit, Material mat, inout RNG rng) {
 float4 ray_color(Ray r, inout RNG rng) {
     float3 throughput     = float3(1.0, 1.0, 1.0);
     float3 pixelColor     = float3(0.0, 0.0, 0.0);
-    // Treat the camera ray as specular so the first emissive surface hit is visible
     bool   specularBounce = true;
 
     for (int bounce = 0; bounce < scene.maxBounces; ++bounce) {
         HitInfo hit = traceScene(r);
         if (!hit.hit) {
-            // Show background only for camera/specular rays (NEE handles diffuse miss)
             if (specularBounce)
-                //pixelColor += throughput * float3(0.70, 0.80, 1.00);
-                pixelColor += throughput * float3(0, 0, 0);
+                   pixelColor += throughput * float3(0, 0, 0);
             break;
         }
 
         Material mat          = materials[hit.materialIndex];
         float3   emittedColor = mat.emissiveFactor.rgb;
 
-        // Add emission only on camera/specular hits to avoid double-counting with NEE
         if (specularBounce)
             pixelColor += throughput * emittedColor;
 
@@ -465,7 +523,6 @@ float4 ray_color(Ray r, inout RNG rng) {
         if (!scatter(r, hit, rng, attenuation, scattered, isSpecular))
             break;
 
-        // NEE: explicitly sample lights for diffuse bounces
         if (!isSpecular && scene.emissiveLightCount > 0)
             pixelColor += throughput * estimateDirect(hit, mat, rng);
 
@@ -501,7 +558,6 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
         accumBuffer[pixelIndex] += color;
     }
 
-    // On the last sample, normalize and write final gamma-corrected result
     if (pushConsts.sampleIndex == scene.samplesPerPixel - 1) {
         float4 finalColor = accumBuffer[pixelIndex] / float(scene.samplesPerPixel);
         finalColor.x = linear_to_gamma(finalColor.x);

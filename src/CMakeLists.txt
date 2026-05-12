@@ -11,6 +11,7 @@ set(Raytracer_SRC
     render/gpu/Renderer.cpp
     render/gpu/VkCore.cpp
     render/gpu/BruteForce.cpp
+    render/gpu/BVH.cpp
 
     utils/SceneLoader.cpp
     utils/utils.cpp
