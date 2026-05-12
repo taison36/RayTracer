@@ -4,6 +4,6 @@
 
 
 int main() {
-    rt::RayTracerApplication app("resources/roomWithBalls7/", std::make_unique<rt::gfx::BruteForce>());
+    rt::RayTracerApplication app("resources/roomWithBalls8/", std::make_unique<rt::gfx::BruteForce>());
     app.run();
 }

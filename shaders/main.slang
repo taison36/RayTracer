@@ -347,53 +347,130 @@ bool lambertian_scatter(Ray r_in, HitInfo hit, Material mat, inout RNG rng, inou
     return true;
 }
 
-bool scatter(Ray r_in, HitInfo hit, RNG rng, inout float3 attenuation, inout Ray scattered) {
+bool scatter(Ray r_in, HitInfo hit, inout RNG rng, inout float3 attenuation, inout Ray scattered, out bool isSpecular) {
     Material mat = materials[hit.materialIndex];
     float4 mrFactor = getMetallicRoughness(mat, hit);
     if (mrFactor.b > 0.5) {
+        isSpecular = true;
         return metall_scatter(r_in, hit, mat, rng, attenuation, scattered);
     } else {
+        isSpecular = false;
         return lambertian_scatter(r_in, hit, mat, rng, attenuation, scattered);
     }
 }
 
+// Returns true if the shadow ray from origin toward dir is blocked before maxDist,
+// ignoring triangle skipTriIdx (the sampled light triangle itself).
+bool isOccluded(float3 origin, float3 dir, float maxDist, uint skipTriIdx) {
+    Ray shadowRay;
+    shadowRay.origin    = origin;
+    shadowRay.direction = dir;
+
+    for (uint i = 0; i < scene.triangleCount; i++) {
+        if (i == skipTriIdx)
+            continue;
+        float  t;
+        float2 bc;
+        if (intersectTriangle(shadowRay, triangles[i], t, bc) && t < maxDist - 1e-4)
+            return true;
+    }
+    return false;
+}
+
+// Sample a random point on emissive triangle at list index listIdx
+float3 sampleEmissiveTriangle(uint listIdx, inout RNG rng, out float3 lightNormal, out float area) {
+    uint     triIdx = emissiveLight[listIdx];
+    Triangle tri    = triangles[triIdx];
+    Vertex   v0     = vertices[tri.indices[0]];
+    Vertex   v1     = vertices[tri.indices[1]];
+    Vertex   v2     = vertices[tri.indices[2]];
+
+    float r1 = rng_next(rng);
+    float r2 = rng_next(rng);
+    if (r1 + r2 > 1.0) { r1 = 1.0 - r1; r2 = 1.0 - r2; }
+    float w = 1.0 - r1 - r2;
+
+    float3 e1       = v1.position.xyz - v0.position.xyz;
+    float3 e2       = v2.position.xyz - v0.position.xyz;
+    float3 crossVec = cross(e1, e2);
+    area            = 0.5 * length(crossVec);
+    lightNormal     = normalize(crossVec);
+
+    return v0.position.xyz * w + v1.position.xyz * r1 + v2.position.xyz * r2;
+}
+
+// Direct light sampling (NEE) contribution at a diffuse hit point
+float3 estimateDirect(HitInfo hit, Material mat, inout RNG rng) {
+    // Pick one emissive triangle uniformly at random
+    uint  lightIdx = min(uint(rng_next(rng) * float(scene.emissiveLightCount)), scene.emissiveLightCount - 1);
+
+    float3 lightNormal;
+    float  area;
+    float3 lightPos = sampleEmissiveTriangle(lightIdx, rng, lightNormal, area);
+
+    float3 toLight    = lightPos - hit.position;
+    float  dist       = length(toLight);
+    float3 toLightDir = toLight / dist;
+
+    float cosTheta      = dot(hit.normal,   toLightDir);  // surface facing light
+    float cosThetaLight = abs(dot(lightNormal, toLightDir));  // light facing surface (both sides)
+
+    if (cosTheta <= 0.0)
+        return float3(0.0, 0.0, 0.0);
+
+    uint     lightTriIdx = emissiveLight[lightIdx];
+    float3 shadowOrigin = hit.position + hit.normal * 1e-4;
+    if (isOccluded(shadowOrigin, toLightDir, dist, lightTriIdx))
+        return float3(0.0, 0.0, 0.0);
+    Material lightMat    = materials[triangles[lightTriIdx].material];
+    float3   Le          = lightMat.emissiveFactor.rgb;
+
+    // Lambertian BRDF = albedo / PI
+    float3 albedo = getBaseColor(mat, hit).xyz;
+
+    // Solid-angle PDF for the sampled point: dist^2 / (area * cosThetaLight)
+    // Combined with uniform light selection: multiply pdf by 1/emissiveLightCount
+    float pdf = (dist * dist) / (area * cosThetaLight * float(scene.emissiveLightCount));
+
+    return Le * (albedo / PI) * cosTheta / pdf;
+}
+
 float4 ray_color(Ray r, inout RNG rng) {
-    float3 throughput = float3(1.0, 1.0, 1.0); // накопление энергии
-    float3 pixelColor = float3(0.0, 0.0, 0.0);
+    float3 throughput     = float3(1.0, 1.0, 1.0);
+    float3 pixelColor     = float3(0.0, 0.0, 0.0);
+    // Treat the camera ray as specular so the first emissive surface hit is visible
+    bool   specularBounce = true;
 
     for (int bounce = 0; bounce < scene.maxBounces; ++bounce) {
         HitInfo hit = traceScene(r);
-        if (hit.hit) {
-            // Add emissive contribution
-            Material mat = materials[hit.materialIndex];
-            float3 emittedColor = mat.emissiveFactor.rgb;
-
-            Ray scattered;
-            float3 attenuation;
-
-            if (scatter(r, hit, rng, attenuation, scattered)) {
-                pixelColor += throughput * emittedColor;
-
-                // Update throughput for NEXT bounce
-                throughput *= attenuation;
-                r = scattered;
-            } else {
-                // Still add emission when scatter fails
-                pixelColor += throughput * emittedColor;
-                break;
-            }
-        }
-        else {
-            //// Ray missed or hit background triangle - return sky color
-            //float3 unitDir = normalize(r.direction);
-            //float a = 0.5 * (unitDir.y + 1.0);
-            //float3 sky = (1.0 - a) * float3(1.0, 1.0, 1.0)
-            //           + a * float3(0.5, 0.7, 1.0);
-            //
-            //pixelColor += throughput * sky;
-            pixelColor += throughput * float3(0.70, 0.80, 1.00);
+        if (!hit.hit) {
+            // Show background only for camera/specular rays (NEE handles diffuse miss)
+            if (specularBounce)
+                pixelColor += throughput * float3(0.70, 0.80, 1.00);
             break;
         }
+
+        Material mat          = materials[hit.materialIndex];
+        float3   emittedColor = mat.emissiveFactor.rgb;
+
+        // Add emission only on camera/specular hits to avoid double-counting with NEE
+        if (specularBounce)
+            pixelColor += throughput * emittedColor;
+
+        Ray    scattered;
+        float3 attenuation;
+        bool   isSpecular;
+
+        if (!scatter(r, hit, rng, attenuation, scattered, isSpecular))
+            break;
+
+        // NEE: explicitly sample lights for diffuse bounces
+        if (!isSpecular && scene.emissiveLightCount > 0)
+            pixelColor += throughput * estimateDirect(hit, mat, rng);
+
+        throughput    *= attenuation;
+        r              = scattered;
+        specularBounce = isSpecular;
     }
 
     return float4(pixelColor, 1.0);
