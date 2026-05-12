@@ -52,9 +52,9 @@ namespace rt::gfx {
             .directionalLightCount   = static_cast<uint32_t>(context.scene->directionalLight.size()),
             .pointLightCount         = static_cast<uint32_t>(context.scene->pointLight.size()),
             .spotLightCount          = static_cast<uint32_t>(context.scene->spotLight.size()),
-            .maxBounces              = 8,
-            .samplesPerPixel         = 30,
-            .samplesPerEmissiveLight = 1 
+            .maxBounces              = 10,
+            .samplesPerPixel         = 40,
+            .samplesPerEmissiveLight = 100
         };
 
         return sceneUBO;
