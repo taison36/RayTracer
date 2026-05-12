@@ -64,6 +64,7 @@ endfunction()
 
 set(SHADERS
    ${CMAKE_CURRENT_LIST_DIR}/shaders/main.slang
+   ${CMAKE_CURRENT_LIST_DIR}/shaders/bvh.slang
 )
 
 compileShaderSlang(compileShaders SOURCES ${SHADERS})

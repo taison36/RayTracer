@@ -31,8 +31,8 @@ namespace rt::gfx {
                                {*descriptorSets.front()},
                                nullptr);
         cmb.pushConstants(*pipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
-        cmb.dispatch((tileWidth  + 7) / 8,
-                     (tileHeight + 7) / 8,
+        cmb.dispatch((tileWidth  + 15) / 16,
+                     (tileHeight + 15) / 16,
                      1);
     }
 
