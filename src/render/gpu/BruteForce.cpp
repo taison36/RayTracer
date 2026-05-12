@@ -37,6 +37,10 @@ namespace rt::gfx {
     }
 
 
+    const std::string BruteForce::getTypeName() const {
+       return "Brute Force";
+    }
+
     SceneSettings BruteForce::extractSceneSettings(const RendererContext& context) const {
         CameraData cameraData = {
             .viewInverse = glm::inverse(context.scene->camera.getView()),

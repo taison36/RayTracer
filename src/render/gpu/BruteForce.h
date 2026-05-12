@@ -71,6 +71,7 @@ namespace rt::gfx {
         std::vector<TextureImage> textures;
 
         SceneSettings extractSceneSettings(const RendererContext& context) const;
+
         TextureImage  extractTextureImage(const VkCore& vkCore, const Texture& texture) const;
         void fillBuffers(const VkCore& vkCore, const RendererContext& context);
         void fillTextures(const VkCore& vkCore, const RendererContext& context);
@@ -87,5 +88,6 @@ namespace rt::gfx {
         void record(const vk::CommandBuffer& cmb, uint32_t tileWidth, uint32_t tileHeight,
                     uint32_t sampleIndex, uint32_t tileOffsetX, uint32_t tileOffsetY) override;
         uint32_t getSamplesPerPixel() const override { return sceneSettings.samplesPerPixel; }
+        const std::string getTypeName() const override;
     };
 }// rt::gfx

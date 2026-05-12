@@ -236,6 +236,10 @@ namespace rt::gfx {
                      1);
     }
 
+    const std::string BVH::getTypeName() const {
+        return "SAH-BVH";
+    }
+
     BvhSceneSettings BVH::extractSceneSettings(const RendererContext &context) const {
         BvhCameraData cameraData = {
             .viewInverse = glm::inverse(context.scene->camera.getView()),
@@ -253,8 +257,8 @@ namespace rt::gfx {
             .pointLightCount = static_cast<uint32_t>(context.scene->pointLight.size()),
             .spotLightCount = static_cast<uint32_t>(context.scene->spotLight.size()),
             .maxBounces = 8,
-            .samplesPerPixel = 1000,
-            .samplesPerEmissiveLight = 10
+            .samplesPerPixel = 30,
+            .samplesPerEmissiveLight = 1
         };
     }
 

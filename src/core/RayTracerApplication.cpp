@@ -22,7 +22,7 @@ namespace rt {
 
         renderer->run(context, *buffer);
 
-        std::println("[INFO] RendererGPU has finished Time: {} ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start).count());
+        std::println("[INFO] RendererGPU has finished Time: {} s", std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now() - start).count());
 
         save_as_ppm("checker.ppm");
     }
