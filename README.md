@@ -5,4 +5,4 @@ Building a simple GPU ray tracer using the Vulkan compute pipeline (no ray traci
 The focus is on implementing and comparing different acceleration structures (e.g. BVH, grid) and seeing how they behave in terms of performance and memory on the GPU.
 
 
-<img width="1024" height="768" alt="image" src="https://github.com/user-attachments/assets/4a5929a1-a467-48bc-b89c-834f1e1ed93d" />
+<img width="800" height="600" alt="telegram-cloud-photo-size-2-5192809353327613881-x" src="https://github.com/user-attachments/assets/8b3da355-1cde-4ae3-a734-1df06b5f3ef8" />
