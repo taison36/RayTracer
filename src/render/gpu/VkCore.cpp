@@ -132,7 +132,6 @@ namespace rt::gfx {
     
     void VkCore::pickPhysicalDevice() {
       std::vector<vk::raii::PhysicalDevice> physicalDevices = instance.enumeratePhysicalDevices();
-      std::println("[INFO] PhysicalDevice count: {}", physicalDevices.size());
       auto const devIter = std::ranges::find_if( physicalDevices, [&]( auto const & physicalDevice ) { return isDeviceSuitable( physicalDevice ); } );
       if ( devIter == physicalDevices.end() )
       {

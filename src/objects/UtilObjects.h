@@ -1,20 +1,29 @@
 #pragma once
-#include "Camera.h"
 #include "../core/Scene.h"
 
 namespace rt {
-
-    struct ScreenSettings {
+    struct SceneSettings {
         const uint32_t WIDTH;
         const uint32_t HEIGHT;
         const float FOV;
         const float IMAGE_ASPECT_RATIO;
+        const uint32_t maxBounces;
+        const uint32_t samplesPerPixel;
+        const uint32_t samplesPerEmissiveLight;
 
-        ScreenSettings(const uint32_t width, const uint32_t height, const float fov)
+        SceneSettings(const uint32_t width,
+                      const uint32_t height,
+                      const float fov,
+                      const uint32_t maxBounces,
+                      const uint32_t samplesPerPixel,
+                      const uint32_t samplesPerEmissiveLight)
             : WIDTH(width),
               HEIGHT(height),
               FOV(fov),
-              IMAGE_ASPECT_RATIO(static_cast<float>(WIDTH) / static_cast<float>(HEIGHT)) {
+              IMAGE_ASPECT_RATIO(static_cast<float>(WIDTH) / static_cast<float>(HEIGHT)),
+              maxBounces(maxBounces),
+              samplesPerPixel(samplesPerPixel),
+              samplesPerEmissiveLight(samplesPerEmissiveLight) {
         }
     };
 
@@ -49,9 +58,9 @@ namespace rt {
     namespace gfx {
         struct RendererContext {
             const Scene *scene;
-            const ScreenSettings *screenSettings;
+            const SceneSettings *screenSettings;
 
-            RendererContext(const Scene *scene, const ScreenSettings *screenSettings)
+            RendererContext(const Scene *scene, const SceneSettings *screenSettings)
                 : scene(scene),
                   screenSettings(screenSettings) {
             }

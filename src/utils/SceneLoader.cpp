@@ -400,8 +400,6 @@ namespace rt {
             builder = builder.setZoom(zoom);
         }
 
-        std::println("[INFO] Using gltf provided camera");
-
         return builder.build();
     }
 
