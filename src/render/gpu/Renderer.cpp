@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include <algorithm>
+#include <chrono>
 #include <print>
 
 namespace rt::gfx {
@@ -7,13 +8,16 @@ namespace rt::gfx {
     Renderer::Renderer(std::unique_ptr<AccelerationStruct> accelStruct)
         : accelStruct(std::move(accelStruct)) {
 
-        std::println("[INFO] Using acceleration structure named: {}", this->accelStruct->getTypeName());
     }
 
     void Renderer::run(const RendererContext &context, FrameBuffer &fb) {
+        std::println("[INFO] Using acceleration structure named: {}", this->accelStruct->getTypeName());
         auto outputImage = createOutputImage(context);
 
+        auto startBuilding = std::chrono::high_resolution_clock::now();
         accelStruct->build(vkCore, context, outputImage);
+
+        std::println("[INFO] Build of acceleration structure has finished; Time: {} ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startBuilding).count());
 
         // Split work into tiles to avoid macOS Metal GPU watchdog timeout (~5s limit).
         // Each tile × sample is a separate command buffer submission.

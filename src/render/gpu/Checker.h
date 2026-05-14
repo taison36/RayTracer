@@ -22,6 +22,7 @@ namespace rt::gfx {
         void record(const vk::CommandBuffer& cmb, uint32_t tileWidth, uint32_t tileHeight,
                     uint32_t sampleIndex, uint32_t tileOffsetX, uint32_t tileOffsetY) override;
         uint32_t getSamplesPerPixel() const override { return 1; }
+        const std::string getTypeName() const override { return "Checker"; }
     };
 
 }// rt::gfx
