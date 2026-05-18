@@ -175,7 +175,7 @@ namespace rt::gfx {
         BvhTextureImage textureImage;
         vk::ImageCreateInfo imageInfo{
             .imageType      = vk::ImageType::e2D,
-            .format         = vk::Format::eR8G8B8A8Unorm,
+            .format         = vk::Format::eR8G8B8A8Srgb,
             .extent.width   = texture.width,
             .extent.height  = texture.height,
             .extent.depth   = 1,
@@ -200,7 +200,7 @@ namespace rt::gfx {
         vk::ImageViewCreateInfo viewInfo{
             .image                           = *textureImage.image,
             .viewType                        = vk::ImageViewType::e2D,
-            .format                          = vk::Format::eR8G8B8A8Unorm,
+            .format                          = vk::Format::eR8G8B8A8Srgb,
             .subresourceRange.aspectMask     = vk::ImageAspectFlagBits::eColor,
             .subresourceRange.baseMipLevel   = 0,
             .subresourceRange.levelCount     = 1,

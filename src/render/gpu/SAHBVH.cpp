@@ -206,7 +206,7 @@ BvhSceneSettings SAHBVH::extractSceneSettings(const RendererContext& context) co
 BvhTextureImage SAHBVH::extractTextureImage(const VkCore& vkCore, const Texture& texture) const {
     BvhTextureImage ti;
     vk::ImageCreateInfo imageInfo{
-        .imageType = vk::ImageType::e2D, .format = vk::Format::eR8G8B8A8Unorm,
+        .imageType = vk::ImageType::e2D, .format = vk::Format::eR8G8B8A8Srgb,
         .extent.width = texture.width, .extent.height = texture.height, .extent.depth = 1,
         .mipLevels = 1, .arrayLayers = 1, .samples = vk::SampleCountFlagBits::e1,
         .tiling = vk::ImageTiling::eOptimal,
@@ -221,7 +221,7 @@ BvhTextureImage SAHBVH::extractTextureImage(const VkCore& vkCore, const Texture&
     });
     ti.image.bindMemory(*ti.memory, 0);
     ti.view = vk::raii::ImageView(vkCore.getDevice(), vk::ImageViewCreateInfo{
-        .image = *ti.image, .viewType = vk::ImageViewType::e2D, .format = vk::Format::eR8G8B8A8Unorm,
+        .image = *ti.image, .viewType = vk::ImageViewType::e2D, .format = vk::Format::eR8G8B8A8Srgb,
         .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
     });
 

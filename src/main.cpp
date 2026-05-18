@@ -7,9 +7,9 @@
 
 int main() {
     const std::string pathToScene = "resources/roomWith3Balls2/";
-    constexpr uint32_t maxBounces = 8;
-    constexpr uint32_t samplesPerPixel = 900;
-    constexpr uint32_t samplesPerEmissiveLight = 4;
+    constexpr uint32_t maxBounces = 10;
+    constexpr uint32_t samplesPerPixel = 100;
+    constexpr uint32_t samplesPerEmissiveLight = 6;
     auto scene_settings = std::make_unique<rt::SceneSettings>(rt::WIDTH,
                                                               rt::HEIGHT,
                                                               rt::FOV,
