@@ -12,7 +12,7 @@ namespace rt {
                                                std::unique_ptr<gfx::AccelerationStruct> accelStruct,
                                                std::unique_ptr<SceneSettings> sceneSettings)
         : screenSettings(std::move(sceneSettings)),
-          buffer(std::make_unique<FrameBuffer>(WIDTH, HEIGHT)),
+          buffer(std::make_unique<FrameBuffer>(screenSettings->WIDTH, screenSettings->HEIGHT)),
           renderer(std::make_unique<gfx::Renderer>(std::move(accelStruct))),
           scene(std::make_unique<Scene>(SceneLoader::loadScene(scenePath))) {
     }

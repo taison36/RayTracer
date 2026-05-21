@@ -4,7 +4,9 @@
 #include "vulkan/vulkan.hpp"
 #include <vulkan/vulkan_core.h>
 #include <glm/glm.hpp>
+#include <memory>
 #include "AccelerationStructure.h"
+#include "KDTreeBuilder.h"
 
 namespace rt::gfx {
 #ifndef MAX_TEXTURE_NUMBER
@@ -104,6 +106,8 @@ namespace rt::gfx {
         std::vector<KDNode>   kdNodeData;
         std::vector<uint32_t> kdTriIndexData;
 
+        std::unique_ptr<IKDTreeBuilder> builder;
+
         KDSceneSettings extractSceneSettings(const RendererContext& context) const;
         KDTextureImage  extractTextureImage(const VkCore& vkCore, const Texture& texture) const;
 
@@ -120,7 +124,8 @@ namespace rt::gfx {
         void createPipeline(const VkCore& vkCore);
 
     public:
-        KDTree() = default;
+        explicit KDTree(std::unique_ptr<IKDTreeBuilder> b = std::make_unique<BinnedSAHBuilder>())
+            : builder(std::move(b)) {}
         void build(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage) override;
         void record(const vk::CommandBuffer& cmb, uint32_t tileWidth, uint32_t tileHeight,
                     uint32_t sampleIndex, uint32_t tileOffsetX, uint32_t tileOffsetY) override;

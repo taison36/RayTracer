@@ -3,6 +3,7 @@
 #include "vulkan/vulkan.hpp"
 #include <algorithm>
 #include <bit>
+#include <cstdio>
 #include <limits>
 
 namespace rt::gfx {
@@ -122,6 +123,8 @@ namespace rt::gfx {
         bvhNodeData.emplace_back(); // root = index 0
 
         buildNode(0, 0, n, bvhNodeData, bvhTriIndexData, infos);
+        printf("BVH [Midpoint]: %zu nodes, %zu tri refs, 1.00x duplication\n",
+               bvhNodeData.size(), bvhTriIndexData.size());
     }
 
     void BVH::build(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage) {
@@ -165,9 +168,9 @@ namespace rt::gfx {
             .directionalLightCount = static_cast<uint32_t>(context.scene->directionalLight.size()),
             .pointLightCount       = static_cast<uint32_t>(context.scene->pointLight.size()),
             .spotLightCount        = static_cast<uint32_t>(context.scene->spotLight.size()),
-            .maxBounces            = 8,
-            .samplesPerPixel       = 30,
-            .samplesPerEmissiveLight = 1
+            .maxBounces              = context.screenSettings->maxBounces,
+            .samplesPerPixel         = context.screenSettings->samplesPerPixel,
+            .samplesPerEmissiveLight = context.screenSettings->samplesPerEmissiveLight
         };
     }
 

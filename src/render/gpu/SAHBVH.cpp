@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstdio>
 #include <limits>
 
 namespace rt::gfx {
@@ -152,6 +153,8 @@ void SAHBVH::buildBVH(const std::vector<rt::Triangle>& tris, const std::vector<r
     bvhNodeData.reserve(2 * n);
     bvhNodeData.emplace_back();
     buildNode(0, 0, n, bvhNodeData, bvhTriIndexData, infos);
+    printf("BVH [SAH]: %zu nodes, %zu tri refs, 1.00x duplication\n",
+           bvhNodeData.size(), bvhTriIndexData.size());
 }
 
 // ── Vulkan setup ──────────────────────────────────────────────────────────────

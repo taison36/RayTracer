@@ -280,43 +280,30 @@ void resolveHit(uint triIdx, float t, float2 bary, Ray ray, inout HitInfo hit) {
     }
 }
 
-// ── KD-Tree ordered traversal ─────────────────────────────────────────────────
-// Each stack entry carries the [tMin, tMax] ray interval for that node.
-// The near child is always processed first (pushed last onto the stack).
-// Early exit: if the front of the stack has tMin > current best hit, we stop.
-struct KDStackEntry {
-    uint  nodeIdx;
-    float tMin;
-    float tMax;
-};
-
+// ── KD-Tree traversal ─────────────────────────────────────────────────────────
+// Each node stores a full AABB. We test the AABB against the ray with the
+// current best hit.t as the far bound, identical to bvh.slang. This avoids
+// tMin/tMax tracking and lets the stack hold plain node indices (4 bytes each)
+// instead of KDStackEntry structs (12 bytes each), reducing register pressure.
 HitInfo traceScene(inout Ray ray) {
     HitInfo hit;
     hit.hit = false;
     hit.t   = 1e10;
 
-    // Intersect root AABB to get the initial ray interval.
-    KDNode root = kdNodes[0];
-    float  rootTMin, rootTMax;
-    if (!intersectAABBInterval(ray, root.data0.xyz, root.data1.xyz, rootTMin, rootTMax))
-        return hit;
-
-    KDStackEntry stack[64];
-    int top    = 0;
-    stack[0]   = { 0u, rootTMin, rootTMax };
+    uint stack[64];
+    int  top  = 0;
+    stack[0]  = 0u;
 
     while (top >= 0) {
-        KDStackEntry e = stack[top--];
-
-        // If the closest point in this node is already farther than the best
-        // hit we've found, everything remaining on the stack is also farther.
-        if (e.tMin > hit.t)
-            continue;
-
-        KDNode node  = kdNodes[e.nodeIdx];
+        KDNode node  = kdNodes[stack[top--]];
         uint   flags = asuint(node.data1.w);
-        bool   isLeaf = (flags >> 31) != 0u;
 
+        float tNear, tFar;
+        if (!intersectAABBInterval(ray, node.data0.xyz, node.data1.xyz, tNear, tFar))
+            continue;
+        if (tNear > hit.t) continue;
+
+        bool isLeaf = (flags >> 31) != 0u;
         if (isLeaf) {
             uint triCount  = flags & 0x1FFFFFFFu;
             uint firstPrim = asuint(node.data0.w);
@@ -327,31 +314,10 @@ HitInfo traceScene(inout Ray ray) {
                     resolveHit(triIdx, t, bary, ray, hit);
             }
         } else {
-            uint  leftChild = flags & 0x1FFFFFFFu;
-            uint  axis      = (flags >> 29) & 3u;
-            float splitPos  = node.data0.w; // stored as plain float for interior nodes
-
-            // Parametric t of the ray at the split plane.
-            float tSplit = (splitPos - ray.origin[axis]) / ray.direction[axis];
-
-            // Near child = the side the ray origin is on.
-            bool  originLeft = ray.origin[axis] < splitPos;
-            uint  nearChild  = originLeft ? leftChild : leftChild + 1u;
-            uint  farChild   = originLeft ? leftChild + 1u : leftChild;
-
+            uint leftChild = flags & 0x1FFFFFFFu;
             if (top < 62) {
-                if (tSplit >= e.tMax) {
-                    // Ray exits before reaching the split: only visit near side.
-                    stack[++top] = { nearChild, e.tMin, e.tMax };
-                } else if (tSplit <= e.tMin) {
-                    // Ray enters after the split: only visit far side.
-                    stack[++top] = { farChild, e.tMin, e.tMax };
-                } else {
-                    // Ray straddles the split: visit near first, far second.
-                    // Push far first so near is on top of the stack.
-                    stack[++top] = { farChild,  tSplit, e.tMax };
-                    stack[++top] = { nearChild, e.tMin, tSplit };
-                }
+                stack[++top] = leftChild;
+                stack[++top] = leftChild + 1u;
             }
         }
     }
@@ -392,29 +358,26 @@ bool scatter(Ray r_in, HitInfo hit, inout RNG rng,
     }
 }
 
-// ── KD-Tree shadow ray (ordered, any-hit) ─────────────────────────────────────
+// ── KD-Tree shadow ray (any-hit) ──────────────────────────────────────────────
 bool isOccluded(float3 origin, float3 dir, float maxDist, uint skipTriIdx) {
     Ray shadowRay;
     shadowRay.origin    = origin;
     shadowRay.direction = dir;
 
-    KDNode root = kdNodes[0];
-    float  rootTMin, rootTMax;
-    if (!intersectAABBInterval(shadowRay, root.data0.xyz, root.data1.xyz, rootTMin, rootTMax))
-        return false;
-
-    KDStackEntry stack[64];
-    int top  = 0;
-    stack[0] = { 0u, rootTMin, min(rootTMax, maxDist) };
+    uint stack[64];
+    int  top  = 0;
+    stack[0]  = 0u;
 
     while (top >= 0) {
-        KDStackEntry e = stack[top--];
-        if (e.tMin >= maxDist) continue;
-
-        KDNode node  = kdNodes[e.nodeIdx];
+        KDNode node  = kdNodes[stack[top--]];
         uint   flags = asuint(node.data1.w);
-        bool   isLeaf = (flags >> 31) != 0u;
 
+        float tNear, tFar;
+        if (!intersectAABBInterval(shadowRay, node.data0.xyz, node.data1.xyz, tNear, tFar))
+            continue;
+        if (tNear >= maxDist) continue;
+
+        bool isLeaf = (flags >> 31) != 0u;
         if (isLeaf) {
             uint triCount  = flags & 0x1FFFFFFFu;
             uint firstPrim = asuint(node.data0.w);
@@ -426,24 +389,10 @@ bool isOccluded(float3 origin, float3 dir, float maxDist, uint skipTriIdx) {
                     return true;
             }
         } else {
-            uint  leftChild = flags & 0x1FFFFFFFu;
-            uint  axis      = (flags >> 29) & 3u;
-            float splitPos  = node.data0.w;
-            float tSplit    = (splitPos - shadowRay.origin[axis]) / shadowRay.direction[axis];
-
-            bool originLeft = shadowRay.origin[axis] < splitPos;
-            uint nearChild  = originLeft ? leftChild : leftChild + 1u;
-            uint farChild   = originLeft ? leftChild + 1u : leftChild;
-
+            uint leftChild = flags & 0x1FFFFFFFu;
             if (top < 62) {
-                if (tSplit >= e.tMax)
-                    stack[++top] = { nearChild, e.tMin, e.tMax };
-                else if (tSplit <= e.tMin)
-                    stack[++top] = { farChild, e.tMin, e.tMax };
-                else {
-                    stack[++top] = { farChild,  tSplit, e.tMax };
-                    stack[++top] = { nearChild, e.tMin, tSplit };
-                }
+                stack[++top] = leftChild;
+                stack[++top] = leftChild + 1u;
             }
         }
     }

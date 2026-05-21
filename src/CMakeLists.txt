@@ -14,6 +14,8 @@ set(Raytracer_SRC
     render/gpu/BVH.cpp
     render/gpu/SAHBVH.cpp
     render/gpu/KDTree.cpp
+    render/gpu/KDTreeBuilder.cpp
+    render/gpu/ExactSAHBuilder.cpp
 
     utils/SceneLoader.cpp
     utils/utils.cpp
