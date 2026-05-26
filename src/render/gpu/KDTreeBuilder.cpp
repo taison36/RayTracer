@@ -4,6 +4,7 @@
 #include <array>
 #include <bit>
 #include <limits>
+#include <utility>
 
 namespace rt::gfx {
 
@@ -21,13 +22,15 @@ namespace rt::gfx {
             }
         };
 
-        struct TriInfo {
-            AABB      bounds;
-            glm::vec3 centroid;
+        // Per-instance triangle: carries the effective (possibly clipped) AABB
+        // for this subtree rather than the original full triangle AABB.
+        struct TriInstance {
+            uint32_t idx;
+            AABB     bounds;
         };
 
         static constexpr uint32_t MAX_LEAF_TRIS = 16;
-        static constexpr uint32_t NUM_BINS       = 8;
+        static constexpr uint32_t NUM_BINS       = 33;
         static constexpr uint32_t MAX_DEPTH      = 20;
         static constexpr float    C_TRAV         = 1.5f;
 
@@ -40,6 +43,60 @@ namespace rt::gfx {
             b.expand(glm::vec3(verts[tri.indices[1]].position));
             b.expand(glm::vec3(verts[tri.indices[2]].position));
             return b;
+        }
+
+        // Compute tight per-side AABBs for a triangle straddling the split plane.
+        //
+        // For each edge crossing the plane we compute the intersection point and add
+        // it to both sides; vertices are assigned to the side they sit on.
+        // The resulting boxes are clamped to the child node bounds to account for
+        // tightening done by previous splits higher in the tree.
+        //
+        // Based on Section 3.3 "Triangle-Splitter" of Danilewski et al. 2010.
+        static std::pair<AABB, AABB> clipTriangle(
+            uint32_t triIdx,
+            const std::vector<rt::Triangle>& tris,
+            const std::vector<rt::Vertex>&   verts,
+            int axis, float splitPos,
+            const AABB& leftChildBounds,
+            const AABB& rightChildBounds)
+        {
+            const auto& tri = tris[triIdx];
+            const glm::vec3 v[3] = {
+                glm::vec3(verts[tri.indices[0]].position),
+                glm::vec3(verts[tri.indices[1]].position),
+                glm::vec3(verts[tri.indices[2]].position)
+            };
+
+            AABB leftAABB, rightAABB;
+
+            for (int i = 0; i < 3; i++) {
+                const float coord = v[i][axis];
+                // Vertices on or to the left of the plane go into the left box;
+                // vertices on or to the right go into the right box.
+                if (coord <= splitPos) leftAABB.expand(v[i]);
+                if (coord >= splitPos) rightAABB.expand(v[i]);
+
+                // For edges that strictly cross the plane, compute the intersection
+                // point and add it to both bounding boxes.
+                const int j = (i + 1) % 3;
+                const float ci = v[i][axis], cj = v[j][axis];
+                if ((ci < splitPos) != (cj < splitPos)) {
+                    const float t = (splitPos - ci) / (cj - ci);
+                    const glm::vec3 p = v[i] + t * (v[j] - v[i]);
+                    leftAABB.expand(p);
+                    rightAABB.expand(p);
+                }
+            }
+
+            // Clamp to child node bounds — triangles may have been clipped in prior
+            // splits, so the child bounds can be tighter than the split plane alone.
+            leftAABB.min  = glm::max(leftAABB.min,  leftChildBounds.min);
+            leftAABB.max  = glm::min(leftAABB.max,  leftChildBounds.max);
+            rightAABB.min = glm::max(rightAABB.min, rightChildBounds.min);
+            rightAABB.max = glm::min(rightAABB.max, rightChildBounds.max);
+
+            return {leftAABB, rightAABB};
         }
 
         void makeKDLeaf(KDNode& node, const AABB& bounds, uint32_t firstPrim, uint32_t count) {
@@ -55,19 +112,21 @@ namespace rt::gfx {
             node.data1 = glm::vec4(bounds.max, std::bit_cast<float>(flags));
         }
 
-        void buildNode(uint32_t               nodeIdx,
-                       std::vector<uint32_t>  triIndices,
-                       AABB                   nodeBounds,
-                       std::vector<KDNode>&   nodes,
-                       std::vector<uint32_t>& outTriIndices,
-                       const std::vector<TriInfo>& infos,
+        void buildNode(uint32_t                          nodeIdx,
+                       std::vector<TriInstance>          instances,
+                       AABB                              nodeBounds,
+                       std::vector<KDNode>&              nodes,
+                       std::vector<uint32_t>&            outTriIndices,
+                       const std::vector<rt::Triangle>&  tris,
+                       const std::vector<rt::Vertex>&    verts,
                        uint32_t depth)
         {
-            uint32_t count = static_cast<uint32_t>(triIndices.size());
+            uint32_t count = static_cast<uint32_t>(instances.size());
 
             auto makeLeaf = [&]() {
                 uint32_t first = static_cast<uint32_t>(outTriIndices.size());
-                outTriIndices.insert(outTriIndices.end(), triIndices.begin(), triIndices.end());
+                for (const auto& inst : instances)
+                    outTriIndices.push_back(inst.idx);
                 makeKDLeaf(nodes[nodeIdx], nodeBounds, first, count);
             };
 
@@ -87,9 +146,9 @@ namespace rt::gfx {
                 std::array<BinCount, NUM_BINS> bins{};
                 float inv = static_cast<float>(NUM_BINS) / (hi - lo);
 
-                for (uint32_t idx : triIndices) {
-                    int enterBin = std::clamp(static_cast<int>((infos[idx].bounds.min[axis] - lo) * inv), 0, static_cast<int>(NUM_BINS)-1);
-                    int exitBin  = std::clamp(static_cast<int>((infos[idx].bounds.max[axis] - lo) * inv), 0, static_cast<int>(NUM_BINS)-1);
+                for (const auto& inst : instances) {
+                    int enterBin = std::clamp(static_cast<int>((inst.bounds.min[axis] - lo) * inv), 0, static_cast<int>(NUM_BINS)-1);
+                    int exitBin  = std::clamp(static_cast<int>((inst.bounds.max[axis] - lo) * inv), 0, static_cast<int>(NUM_BINS)-1);
                     bins[enterBin].enter++;
                     bins[exitBin ].exit++;
                 }
@@ -119,25 +178,41 @@ namespace rt::gfx {
 
             if (bestAxis == -1 || bestCost >= static_cast<float>(count)) { makeLeaf(); return; }
 
-            std::vector<uint32_t> leftTris, rightTris;
-            leftTris.reserve(count); rightTris.reserve(count);
-            for (uint32_t idx : triIndices) {
-                if (infos[idx].bounds.min[bestAxis] <  bestSplit) leftTris.push_back(idx);
-                if (infos[idx].bounds.max[bestAxis] >= bestSplit) rightTris.push_back(idx);
+            AABB leftChildBounds  = nodeBounds; leftChildBounds.max[bestAxis]  = bestSplit;
+            AABB rightChildBounds = nodeBounds; rightChildBounds.min[bestAxis] = bestSplit;
+
+            std::vector<TriInstance> leftInsts, rightInsts;
+            leftInsts.reserve(count);
+            rightInsts.reserve(count);
+
+            for (const auto& inst : instances) {
+                const bool goLeft  = inst.bounds.min[bestAxis] <  bestSplit;
+                const bool goRight = inst.bounds.max[bestAxis] >= bestSplit;
+
+                if (goLeft && goRight) {
+                    // Triangle straddles the plane: compute tight AABBs for each
+                    // fragment by clipping against the split plane and child bounds.
+                    auto [lb, rb] = clipTriangle(inst.idx, tris, verts,
+                                                 bestAxis, bestSplit,
+                                                 leftChildBounds, rightChildBounds);
+                    leftInsts.push_back({inst.idx, lb});
+                    rightInsts.push_back({inst.idx, rb});
+                } else if (goLeft) {
+                    leftInsts.push_back(inst);
+                } else {
+                    rightInsts.push_back(inst);
+                }
             }
 
-            if (leftTris.empty() || rightTris.empty()) { makeLeaf(); return; }
+            if (leftInsts.empty() || rightInsts.empty()) { makeLeaf(); return; }
 
             uint32_t leftIdx = static_cast<uint32_t>(nodes.size());
             nodes.emplace_back();
             nodes.emplace_back();
             makeKDInterior(nodes[nodeIdx], nodeBounds, static_cast<uint32_t>(bestAxis), bestSplit, leftIdx);
 
-            AABB leftBounds  = nodeBounds; leftBounds.max[bestAxis]  = bestSplit;
-            AABB rightBounds = nodeBounds; rightBounds.min[bestAxis] = bestSplit;
-
-            buildNode(leftIdx,     std::move(leftTris),  leftBounds,  nodes, outTriIndices, infos, depth+1);
-            buildNode(leftIdx + 1, std::move(rightTris), rightBounds, nodes, outTriIndices, infos, depth+1);
+            buildNode(leftIdx,     std::move(leftInsts),  leftChildBounds,  nodes, outTriIndices, tris, verts, depth+1);
+            buildNode(leftIdx + 1, std::move(rightInsts), rightChildBounds, nodes, outTriIndices, tris, verts, depth+1);
         }
     } // anonymous namespace
 
@@ -157,19 +232,17 @@ namespace rt::gfx {
             return;
         }
 
-        std::vector<TriInfo> infos(n);
-        std::vector<uint32_t> allIndices(n);
+        std::vector<TriInstance> instances(n);
         AABB sceneBounds;
         for (uint32_t i = 0; i < n; i++) {
-            allIndices[i]    = i;
-            infos[i].bounds  = triAABB(i, tris, verts);
-            infos[i].centroid = 0.5f * (infos[i].bounds.min + infos[i].bounds.max);
-            sceneBounds.expand(infos[i].bounds);
+            instances[i].idx    = i;
+            instances[i].bounds = triAABB(i, tris, verts);
+            sceneBounds.expand(instances[i].bounds);
         }
 
         outNodes.reserve(2 * n);
         outNodes.emplace_back(); // root = index 0
-        buildNode(0, std::move(allIndices), sceneBounds, outNodes, outTriIndices, infos, 0);
+        buildNode(0, std::move(instances), sceneBounds, outNodes, outTriIndices, tris, verts, 0);
     }
 
 } // rt::gfx

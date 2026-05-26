@@ -3,21 +3,24 @@
 #include <algorithm>
 #include <bit>
 #include <limits>
+#include <utility>
 
 // Implementation follows the algorithm described in:
 //   Havran, "Heuristic Ray Shooting Algorithms", PhD Thesis, 2000
 //   Section 4.4 (empty-space cutting) and 4.2.3 (OSAH event sweep)
 //
-// Key design: OSAH without triangle clipping.
-// Raw triangle AABBs are used throughout — no Sutherland-Hodgman polygon clipping.
-// "Exact" means split candidates are the actual triangle AABB boundaries (2N per axis),
-// not a fixed bin grid, so the true SAH minimum is found.
+// Triangle splitting (Danilewski et al. 2010, Section 3.3):
+// Straddling triangles are clipped against the split plane so each child gets
+// a tight AABB enclosing only the fragment on its side, rather than the full
+// triangle AABB. Per-instance bounds (TriInstance.bounds) propagate these
+// tighter AABBs through the recursion, which also improves the event positions
+// used in the OSAH sweep at deeper levels.
 
 namespace rt::gfx {
     namespace {
 
         static constexpr uint32_t MAX_LEAF_TRIS = 16;
-        static constexpr uint32_t MAX_DEPTH     = 20;
+        static constexpr uint32_t MAX_DEPTH     = 40; // ESC cuts consume depth; 40 leaves room for both
         static constexpr float    C_TRAV        = 1.5f;
         static constexpr float    C_ISECT       = 1.0f;
 
@@ -34,6 +37,13 @@ namespace rt::gfx {
             }
         };
 
+        // Per-instance triangle: carries the effective (possibly clipped) AABB
+        // for this subtree rather than the original full triangle AABB.
+        struct TriInstance {
+            uint32_t idx;
+            AABB     bounds;
+        };
+
         // ── KD-Node encoding (must match kdtree.slang) ───────────────────────────────
         void makeLeafNode(KDNode& node, const AABB& bounds, uint32_t firstPrim, uint32_t count) {
             node.data0 = glm::vec4(bounds.min, std::bit_cast<float>(firstPrim));
@@ -48,41 +58,87 @@ namespace rt::gfx {
             node.data1 = glm::vec4(bounds.max, std::bit_cast<float>(flags));
         }
 
+        // Compute tight per-side AABBs for a triangle straddling the split plane.
+        // Vertices are classified to sides; edges strictly crossing the plane are
+        // intersected and the point added to both boxes. Results are clamped to the
+        // child node bounds to enforce all previous spatial constraints.
+        static std::pair<AABB, AABB> clipTriangle(
+            uint32_t triIdx,
+            const std::vector<rt::Triangle>& tris,
+            const std::vector<rt::Vertex>&   verts,
+            int axis, float splitPos,
+            const AABB& leftChildBounds,
+            const AABB& rightChildBounds)
+        {
+            const auto& tri = tris[triIdx];
+            const glm::vec3 v[3] = {
+                glm::vec3(verts[tri.indices[0]].position),
+                glm::vec3(verts[tri.indices[1]].position),
+                glm::vec3(verts[tri.indices[2]].position)
+            };
+
+            AABB leftAABB, rightAABB;
+
+            for (int i = 0; i < 3; i++) {
+                const float coord = v[i][axis];
+                if (coord <= splitPos) leftAABB.expand(v[i]);
+                if (coord >= splitPos) rightAABB.expand(v[i]);
+
+                const int j = (i + 1) % 3;
+                const float ci = v[i][axis], cj = v[j][axis];
+                if ((ci < splitPos) != (cj < splitPos)) {
+                    const float t = (splitPos - ci) / (cj - ci);
+                    const glm::vec3 p = v[i] + t * (v[j] - v[i]);
+                    leftAABB.expand(p);
+                    rightAABB.expand(p);
+                }
+            }
+
+            leftAABB.min  = glm::max(leftAABB.min,  leftChildBounds.min);
+            leftAABB.max  = glm::min(leftAABB.max,  leftChildBounds.max);
+            rightAABB.min = glm::max(rightAABB.min, rightChildBounds.min);
+            rightAABB.max = glm::min(rightAABB.max, rightChildBounds.max);
+
+            return {leftAABB, rightAABB};
+        }
+
         // ── Recursive builder ─────────────────────────────────────────────────────────
         void buildNode(
-            uint32_t               nodeIdx,
-            std::vector<uint32_t>  triIndices,
-            AABB                   nodeBounds,
-            std::vector<KDNode>&   nodes,
-            std::vector<uint32_t>& outTriIndices,
-            const std::vector<AABB>& triAABBs,
+            uint32_t                          nodeIdx,
+            std::vector<TriInstance>          instances,
+            AABB                              nodeBounds,
+            std::vector<KDNode>&              nodes,
+            std::vector<uint32_t>&            outTriIndices,
+            const std::vector<rt::Triangle>&  tris,
+            const std::vector<rt::Vertex>&    verts,
             uint32_t depth)
         {
-            uint32_t N        = static_cast<uint32_t>(triIndices.size());
+            uint32_t N        = static_cast<uint32_t>(instances.size());
             float    parentSA = nodeBounds.surfaceArea();
             float    leafCost = static_cast<float>(N) * C_ISECT;
 
             auto emitLeaf = [&]() {
                 uint32_t first = static_cast<uint32_t>(outTriIndices.size());
-                outTriIndices.insert(outTriIndices.end(), triIndices.begin(), triIndices.end());
+                for (const auto& inst : instances)
+                    outTriIndices.push_back(inst.idx);
                 makeLeafNode(nodes[nodeIdx], nodeBounds, first, N);
             };
 
             if (N <= MAX_LEAF_TRIS || depth >= MAX_DEPTH) { emitLeaf(); return; }
 
-            // Cost-based: if leaf cost is within epsilon of best possible split, stop early
-            if (leafCost < C_TRAV * 2.0f) { emitLeaf(); return; }
-
             // ── Phase 1: Empty Space Cutting (Havran §4.4) ───────────────────────────
-            // Compute the tight union AABB of all triangles currently in this node.
+            // Compute the tight union AABB from per-instance (clipped) bounds.
             // Any gap between it and nodeBounds is guaranteed-empty space worth cutting.
             AABB tightBounds;
-            for (uint32_t idx : triIndices) tightBounds.expand(triAABBs[idx]);
+            for (const auto& inst : instances) tightBounds.expand(inst.bounds);
+
+            // A cut is only useful if it beats doing nothing (making a leaf here).
+            const float noSplitCost = leafCost;
 
             int   bestEmptyAxis   = -1;
             float bestEmptyCost   = std::numeric_limits<float>::max();
             float bestEmptySplit  = 0.0f;
-            bool  emptyIsLeft     = false; // true → left child is the empty leaf
+            bool  emptyIsLeft     = false;
 
             for (int axis = 0; axis < 3; axis++) {
                 float lo = nodeBounds.min[axis];
@@ -91,14 +147,16 @@ namespace rt::gfx {
                 float nodeExtent = hi - lo;
                 if (nodeExtent < 1e-7f) continue;
 
-                // Left empty space: all triangles start to the right of lo
                 if (tightBounds.min[axis] > lo) {
                     float sp            = tightBounds.min[axis];
                     float emptyFraction = (sp - lo) / nodeExtent;
                     if (emptyFraction > 0.2f) {
-                        AABB  rB   = nodeBounds; rB.min[axis] = sp;
-                        float cost = C_TRAV + (rB.surfaceArea() / parentSA) * static_cast<float>(N) * C_ISECT;
-                        if (cost < bestEmptyCost) {
+                        // emptyIsLeft=true: left child is empty, right has all N triangles.
+                        AABB  lB   = nodeBounds; lB.max[axis] = sp;  // empty
+                        AABB  rB   = nodeBounds; rB.min[axis] = sp;  // geometry
+                        float cost = C_TRAV
+                                   + (rB.surfaceArea() / parentSA) * static_cast<float>(N) * C_ISECT;
+                        if (cost < noSplitCost && cost < bestEmptyCost) {
                             bestEmptyCost  = cost;
                             bestEmptyAxis  = axis;
                             bestEmptySplit = sp;
@@ -107,14 +165,16 @@ namespace rt::gfx {
                     }
                 }
 
-                // Right empty space: all triangles end before hi
                 if (tightBounds.max[axis] < hi) {
                     float sp            = tightBounds.max[axis];
                     float emptyFraction = (hi - sp) / nodeExtent;
                     if (emptyFraction > 0.2f) {
-                        AABB  lB   = nodeBounds; lB.max[axis] = sp;
-                        float cost = C_TRAV + (lB.surfaceArea() / parentSA) * static_cast<float>(N) * C_ISECT;
-                        if (cost < bestEmptyCost) {
+                        // emptyIsLeft=false: right child is empty, left has all N triangles.
+                        AABB  lB   = nodeBounds; lB.max[axis] = sp;  // geometry
+                        AABB  rB   = nodeBounds; rB.min[axis] = sp;  // empty
+                        float cost = C_TRAV
+                                   + (lB.surfaceArea() / parentSA) * static_cast<float>(N) * C_ISECT;
+                        if (cost < noSplitCost && cost < bestEmptyCost) {
                             bestEmptyCost  = cost;
                             bestEmptyAxis  = axis;
                             bestEmptySplit = sp;
@@ -125,14 +185,14 @@ namespace rt::gfx {
             }
 
             // ── Phase 2: OSAH event sweep (Havran §4.2.3) ───────────────────────────
-            // Split candidates = actual triangle AABB boundaries (2N per axis).
-            // Events are clamped to [lo, hi] so splits are always inside the node.
-            // Sort order: END before START at the same position (Havran tie-breaking).
+            // Split candidates are the per-instance (clipped) AABB boundaries.
+            // Using clipped bounds means events are at the actual fragment extents,
+            // giving more accurate SAH cost estimates than raw triangle AABBs.
             int   bestSAHAxis  = -1;
             float bestSAHCost  = std::numeric_limits<float>::max();
             float bestSAHSplit = 0.0f;
 
-            enum class Ev : uint8_t { END = 0, START = 1 }; // END < START for sort
+            enum class Ev : uint8_t { END = 0, START = 1 };
             struct Event { float pos; Ev type; };
             std::vector<Event> events;
             events.reserve(N * 2);
@@ -143,12 +203,9 @@ namespace rt::gfx {
                 if (hi - lo < 1e-7f) continue;
 
                 events.clear();
-                for (uint32_t idx : triIndices) {
-                    // Clamp to [lo, hi]: triangle AABBs can extend outside the node
-                    // (they were included because they overlap the node, not because
-                    // they are contained in it). Clamping keeps split positions valid.
-                    float eMin = std::clamp(triAABBs[idx].min[axis], lo, hi);
-                    float eMax = std::clamp(triAABBs[idx].max[axis], lo, hi);
+                for (const auto& inst : instances) {
+                    float eMin = std::clamp(inst.bounds.min[axis], lo, hi);
+                    float eMax = std::clamp(inst.bounds.max[axis], lo, hi);
                     events.push_back({eMin, Ev::START});
                     events.push_back({eMax, Ev::END});
                 }
@@ -158,26 +215,13 @@ namespace rt::gfx {
                     return static_cast<uint8_t>(a.type) < static_cast<uint8_t>(b.type);
                 });
 
-                // Sweep with NL = fully-left count, NR = overlapping-right count.
-                // Process in batches of equal position so the evaluation sees the
-                // correct counters for the split sitting exactly at that position.
-                //
-                // Per batch at position p:
-                //   Step 1 — apply ENDs: triangle exits right side at p.
-                //   Step 2 — evaluate SAH for split at p.
-                //   Step 3 — apply STARTs: triangle joins left side after p.
-                //
-                // This correctly handles the two sides of each discontinuity:
-                // after step 1 the split is evaluated on the "right of p" side
-                // (triangles ending at p are left-only); after step 3 the state
-                // represents triangles that have fully passed p.
                 uint32_t NL = 0, NR = N;
                 size_t   i  = 0;
 
                 while (i < events.size()) {
-                    float  pos    = events[i].pos;
-                    uint32_t pEnd = 0, pStart = 0;
-                    size_t   j    = i;
+                    float    pos    = events[i].pos;
+                    uint32_t pEnd   = 0, pStart = 0;
+                    size_t   j      = i;
 
                     while (j < events.size() && events[j].pos == pos) {
                         if (events[j].type == Ev::END) pEnd++;
@@ -185,12 +229,9 @@ namespace rt::gfx {
                         j++;
                     }
 
-                    // Evaluate SAH *before* removing ENDs.
-                    // The partition rule sends triangles with eMax >= splitPos to the right
-                    // child, so triangles with eMax == pos belong in NR at evaluation time.
-                    // Removing them first (old step 1 before step 2) causes NR to
-                    // undercount those triangles, making splits look cheaper than they are.
-                    if (pos > lo && pos < hi) {
+                    NR -= pEnd;
+
+                    if (pos > lo && pos < hi && NL > 0 && NR > 0) {
                         AABB  lB   = nodeBounds; lB.max[axis] = pos;
                         AABB  rB   = nodeBounds; rB.min[axis] = pos;
                         float cost = C_TRAV + C_ISECT * (lB.surfaceArea() * static_cast<float>(NL) +
@@ -202,8 +243,7 @@ namespace rt::gfx {
                         }
                     }
 
-                    NR -= pEnd;   // remove triangles that end here from right count
-                    NL += pStart; // add triangles that start here to left count
+                    NL += pStart;
                     i   = j;
                 }
             }
@@ -212,50 +252,38 @@ namespace rt::gfx {
             float emptyCost = (bestEmptyAxis != -1) ? bestEmptyCost : std::numeric_limits<float>::max();
             float sahCost   = (bestSAHAxis   != -1) ? bestSAHCost   : std::numeric_limits<float>::max();
 
-            // Leaf wins if both subdivision strategies are worse
             if (leafCost <= std::min(emptyCost, sahCost)) { emitLeaf(); return; }
 
             if (emptyCost < sahCost) {
-                // ── Empty space cut (Havran §4.4, two-plane variant Fig 4.7) ─────────
-                // We check whether the opposite side of the same axis also has empty
-                // space. If so, both are cut in one step (two interior nodes, no extra
-                // recursion level needed). tightBounds is still valid here.
+                // ── Empty space cut ───────────────────────────────────────────────────
+                // No triangle straddles an empty-space cut: tightBounds.min[ax] is the
+                // minimum of all inst.bounds.min[ax], so every instance is entirely on
+                // the non-empty side. Pass instances through unchanged.
                 int   ax = bestEmptyAxis;
                 float sp = bestEmptySplit;
 
-                bool secondCut = emptyIsLeft
-                    ? (tightBounds.max[ax] < nodeBounds.max[ax])   // right side also empty
-                    : (tightBounds.min[ax] > nodeBounds.min[ax]);  // left side also empty
+                float nodeExtent = nodeBounds.max[ax] - nodeBounds.min[ax];
+                float frac2 = emptyIsLeft
+                    ? (nodeBounds.max[ax] - tightBounds.max[ax]) / nodeExtent
+                    : (tightBounds.min[ax] - nodeBounds.min[ax]) / nodeExtent;
+                bool  secondCut = frac2 > 0.2f && (depth + 2 < MAX_DEPTH);
                 float sp2 = emptyIsLeft ? tightBounds.max[ax] : tightBounds.min[ax];
 
                 if (secondCut) {
-                    // Two-plane cut on the same axis (Havran Fig 4.7):
-                    // Produces: [empty leaf | inner interior | empty leaf]
-                    //   emptyIsLeft=true  → outer splits at sp  (tightBounds.min), inner at sp2 (tightBounds.max)
-                    //   emptyIsLeft=false → outer splits at sp  (tightBounds.max), inner at sp2 (tightBounds.min)
-                    //
-                    // IMPORTANT: allocate ALL four child nodes before any recursive call.
-                    // buildNode() calls nodes.emplace_back() internally which can reallocate
-                    // the vector, invalidating any pointer/reference into it obtained before.
                     float outerSplit = sp;
                     float innerSplit = sp2;
 
                     uint32_t outerLeft = static_cast<uint32_t>(nodes.size());
-                    nodes.emplace_back(); // outerLeft     (one side: empty leaf)
-                    nodes.emplace_back(); // outerLeft + 1 (other side: inner interior node)
+                    nodes.emplace_back();
+                    nodes.emplace_back();
                     uint32_t innerLeft = static_cast<uint32_t>(nodes.size());
-                    nodes.emplace_back(); // innerLeft     (geometry child or empty leaf)
-                    nodes.emplace_back(); // innerLeft + 1 (empty leaf or geometry child)
+                    nodes.emplace_back();
+                    nodes.emplace_back();
 
                     AABB outerLeftB  = nodeBounds; outerLeftB.max[ax]  = outerSplit;
                     AABB outerRightB = nodeBounds; outerRightB.min[ax] = outerSplit;
 
                     if (emptyIsLeft) {
-                        // Layout: [empty | geometry | empty]
-                        //   outerLeft     = empty leaf        [nodeBounds.min .. outerSplit]
-                        //   outerLeft + 1 = inner interior    [outerSplit     .. nodeBounds.max]
-                        //     innerLeft     = geometry child  [outerSplit     .. innerSplit]
-                        //     innerLeft + 1 = empty leaf      [innerSplit     .. nodeBounds.max]
                         AABB innerLeftB  = outerRightB; innerLeftB.max[ax]  = innerSplit;
                         AABB innerRightB = outerRightB; innerRightB.min[ax] = innerSplit;
 
@@ -263,15 +291,9 @@ namespace rt::gfx {
                         makeLeafNode    (nodes[outerLeft],     outerLeftB,  0, 0);
                         makeInteriorNode(nodes[outerLeft + 1], outerRightB, static_cast<uint32_t>(ax), innerSplit, innerLeft);
                         makeLeafNode    (nodes[innerLeft + 1], innerRightB, 0, 0);
-                        // recurse last — vector may reallocate, all indices already captured above
-                        buildNode(innerLeft, std::move(triIndices), innerLeftB,
-                                  nodes, outTriIndices, triAABBs, depth + 2);
+                        buildNode(innerLeft, std::move(instances), innerLeftB,
+                                  nodes, outTriIndices, tris, verts, depth + 2);
                     } else {
-                        // Layout: [empty | geometry | empty]
-                        //   outerLeft     = inner interior    [nodeBounds.min .. outerSplit]
-                        //     innerLeft     = empty leaf      [nodeBounds.min .. innerSplit]
-                        //     innerLeft + 1 = geometry child  [innerSplit     .. outerSplit]
-                        //   outerLeft + 1 = empty leaf        [outerSplit     .. nodeBounds.max]
                         AABB innerLeftB  = outerLeftB; innerLeftB.max[ax]  = innerSplit;
                         AABB innerRightB = outerLeftB; innerRightB.min[ax] = innerSplit;
 
@@ -279,50 +301,55 @@ namespace rt::gfx {
                         makeInteriorNode(nodes[outerLeft],     outerLeftB,  static_cast<uint32_t>(ax), innerSplit, innerLeft);
                         makeLeafNode    (nodes[outerLeft + 1], outerRightB, 0, 0);
                         makeLeafNode    (nodes[innerLeft],     innerLeftB,  0, 0);
-                        // recurse last
-                        buildNode(innerLeft + 1, std::move(triIndices), innerRightB,
-                                  nodes, outTriIndices, triAABBs, depth + 2);
+                        buildNode(innerLeft + 1, std::move(instances), innerRightB,
+                                  nodes, outTriIndices, tris, verts, depth + 2);
                     }
                 } else {
-                    // Single empty cut — allocate both children before recursing
                     uint32_t leftIdx = static_cast<uint32_t>(nodes.size());
-                    nodes.emplace_back(); // leftIdx
-                    nodes.emplace_back(); // leftIdx + 1
+                    nodes.emplace_back();
+                    nodes.emplace_back();
                     AABB leftBounds  = nodeBounds; leftBounds.max[ax]  = sp;
                     AABB rightBounds = nodeBounds; rightBounds.min[ax] = sp;
 
                     makeInteriorNode(nodes[nodeIdx], nodeBounds, static_cast<uint32_t>(ax), sp, leftIdx);
                     if (emptyIsLeft) {
                         makeLeafNode(nodes[leftIdx], leftBounds, 0, 0);
-                        // recurse last
-                        buildNode(leftIdx + 1, std::move(triIndices), rightBounds,
-                                  nodes, outTriIndices, triAABBs, depth + 1);
+                        buildNode(leftIdx + 1, std::move(instances), rightBounds,
+                                  nodes, outTriIndices, tris, verts, depth + 1);
                     } else {
                         makeLeafNode(nodes[leftIdx + 1], rightBounds, 0, 0);
-                        // recurse last
-                        buildNode(leftIdx, std::move(triIndices), leftBounds,
-                                  nodes, outTriIndices, triAABBs, depth + 1);
+                        buildNode(leftIdx, std::move(instances), leftBounds,
+                                  nodes, outTriIndices, tris, verts, depth + 1);
                     }
                 }
                 return;
             }
 
-            // ── SAH split: partition triangles ────────────────────────────────────────
-            // Left:  min <  splitPos  (triangle starts before the split)
-            // Right: max >= splitPos  (triangle ends at or after the split)
-            // A triangle with min < splitPos AND max >= splitPos goes to both (duplication).
-            // A triangle with max == splitPos and min == splitPos (planar) goes to right only.
-            // Using >= on the right ensures no triangle is ever silently dropped.
-            std::vector<uint32_t> leftTris, rightTris;
-            leftTris.reserve(N); rightTris.reserve(N);
-            for (uint32_t idx : triIndices) {
-                if (triAABBs[idx].min[bestSAHAxis] <  bestSAHSplit) leftTris.push_back(idx);
-                if (triAABBs[idx].max[bestSAHAxis] >= bestSAHSplit) rightTris.push_back(idx);
+            // ── SAH split: partition with triangle splitting ──────────────────────────
+            AABB leftBounds  = nodeBounds; leftBounds.max[bestSAHAxis]  = bestSAHSplit;
+            AABB rightBounds = nodeBounds; rightBounds.min[bestSAHAxis] = bestSAHSplit;
+
+            std::vector<TriInstance> leftInsts, rightInsts;
+            leftInsts.reserve(N); rightInsts.reserve(N);
+
+            for (const auto& inst : instances) {
+                const bool leftOnly  = inst.bounds.max[bestSAHAxis] <= bestSAHSplit;
+                const bool rightOnly = inst.bounds.min[bestSAHAxis] >= bestSAHSplit;
+
+                if (leftOnly) {
+                    leftInsts.push_back(inst);
+                } else if (rightOnly) {
+                    rightInsts.push_back(inst);
+                } else {
+                    auto [lb, rb] = clipTriangle(inst.idx, tris, verts,
+                                                 bestSAHAxis, bestSAHSplit,
+                                                 leftBounds, rightBounds);
+                    leftInsts.push_back({inst.idx, lb});
+                    rightInsts.push_back({inst.idx, rb});
+                }
             }
 
-            // Guard: degenerate split that doesn't separate anything → leaf
-            if (leftTris.empty() || rightTris.empty()) { emitLeaf(); return; }
-
+            if (leftInsts.empty() || rightInsts.empty()) { emitLeaf(); return; }
 
             uint32_t leftIdx = static_cast<uint32_t>(nodes.size());
             nodes.emplace_back();
@@ -330,13 +357,10 @@ namespace rt::gfx {
             makeInteriorNode(nodes[nodeIdx], nodeBounds,
                              static_cast<uint32_t>(bestSAHAxis), bestSAHSplit, leftIdx);
 
-            AABB leftBounds  = nodeBounds; leftBounds.max[bestSAHAxis]  = bestSAHSplit;
-            AABB rightBounds = nodeBounds; rightBounds.min[bestSAHAxis] = bestSAHSplit;
-
-            buildNode(leftIdx,     std::move(leftTris),  leftBounds,
-                      nodes, outTriIndices, triAABBs, depth + 1);
-            buildNode(leftIdx + 1, std::move(rightTris), rightBounds,
-                      nodes, outTriIndices, triAABBs, depth + 1);
+            buildNode(leftIdx,     std::move(leftInsts),  leftBounds,
+                      nodes, outTriIndices, tris, verts, depth + 1);
+            buildNode(leftIdx + 1, std::move(rightInsts), rightBounds,
+                      nodes, outTriIndices, tris, verts, depth + 1);
         }
 
     } // anonymous namespace
@@ -357,23 +381,21 @@ namespace rt::gfx {
             return;
         }
 
-        // Build per-triangle AABBs — no vertex storage needed (no clipping)
-        std::vector<AABB>     triAABBs(n);
-        std::vector<uint32_t> allIndices(n);
+        std::vector<TriInstance> instances(n);
         AABB sceneBounds;
 
         for (uint32_t i = 0; i < n; i++) {
-            allIndices[i] = i;
-            triAABBs[i].expand(glm::vec3(verts[tris[i].indices[0]].position));
-            triAABBs[i].expand(glm::vec3(verts[tris[i].indices[1]].position));
-            triAABBs[i].expand(glm::vec3(verts[tris[i].indices[2]].position));
-            sceneBounds.expand(triAABBs[i]);
+            instances[i].idx = i;
+            instances[i].bounds.expand(glm::vec3(verts[tris[i].indices[0]].position));
+            instances[i].bounds.expand(glm::vec3(verts[tris[i].indices[1]].position));
+            instances[i].bounds.expand(glm::vec3(verts[tris[i].indices[2]].position));
+            sceneBounds.expand(instances[i].bounds);
         }
 
         outNodes.reserve(2 * n);
         outNodes.emplace_back(); // root = index 0
 
-        buildNode(0, std::move(allIndices), sceneBounds, outNodes, outTriIndices, triAABBs, 0);
+        buildNode(0, std::move(instances), sceneBounds, outNodes, outTriIndices, tris, verts, 0);
     }
 
 } // rt::gfx

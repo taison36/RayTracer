@@ -118,7 +118,7 @@ struct KDNode {
 [vk::binding(9, 0)]  RWStructuredBuffer<float4>         accumBuffer;
 [vk::binding(10, 0)] StructuredBuffer<KDNode>           kdNodes;
 [vk::binding(11, 0)] StructuredBuffer<uint>             kdTriIndices;
-[vk::binding(12, 0)] Sampler2D                          textures[]; // must be last (unbounded)
+[vk::binding(12, 0)] Sampler2D                          textures[]; 
 
 struct PushConstants {
     uint sampleIndex;
@@ -366,7 +366,7 @@ bool isOccluded(float3 origin, float3 dir, float maxDist, uint skipTriIdx) {
 
     uint stack[64];
     int  top  = 0;
-    stack[0]  = 0u;
+    stack[0] = 0u;
 
     while (top >= 0) {
         KDNode node  = kdNodes[stack[top--]];

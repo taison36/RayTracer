@@ -3,9 +3,11 @@
 
 namespace rt::gfx {
 
-    // ── Binned SAH builder ────────────────────────────────────────────────────────
+    // ── Binned SAH builder with spatial triangle splitting ────────────────────────
     // Uses 8 fixed bins per axis to approximate the split cost.
-    // Triangles whose AABB straddles the split plane are duplicated into both children.
+    // Triangles straddling the split plane are spatially split: tight per-fragment
+    // AABBs are computed by clipping triangle edges against the plane, reducing the
+    // child bounding boxes compared to simple duplication (Danilewski et al. 2010).
     // O(n * NUM_BINS) per node level. Fast build, good quality for most scenes.
     class BinnedSAHBuilder : public IKDTreeBuilder {
     public:

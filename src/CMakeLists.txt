@@ -16,6 +16,7 @@ set(Raytracer_SRC
     render/gpu/KDTree.cpp
     render/gpu/KDTreeBuilder.cpp
     render/gpu/ExactSAHBuilder.cpp
+    render/gpu/ExactSAHBuilderNoESC.cpp
 
     utils/SceneLoader.cpp
     utils/utils.cpp

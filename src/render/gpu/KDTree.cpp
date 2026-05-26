@@ -3,6 +3,8 @@
 #include "vulkan/vulkan.hpp"
 #include <cstring>
 #include <cstdio>
+#include <bit>
+#include <vector>
 
 namespace rt::gfx {
 
@@ -12,6 +14,46 @@ namespace rt::gfx {
         float dupRatio = static_cast<float>(kdTriIndexData.size()) / static_cast<float>(tris.size());
         printf("KD-Tree [%s]: %zu nodes, %zu tri refs, %.2fx duplication\n",
                builder->getName().c_str(), kdNodeData.size(), kdTriIndexData.size(), dupRatio);
+
+        // ── Tree structure diagnostics ───────────────────────────────────────────
+        {
+            uint32_t maxDepth = 0, leafCount = 0, emptyLeafCount = 0;
+            uint64_t totalLeafDepth = 0, totalLeafTris = 0, maxLeafTris = 0;
+
+            struct Frame { uint32_t idx; uint32_t depth; };
+            std::vector<Frame> stk;
+            stk.reserve(64);
+            stk.push_back({0u, 0u});
+
+            while (!stk.empty()) {
+                auto [idx, d] = stk.back(); stk.pop_back();
+                if (idx >= kdNodeData.size()) continue;
+
+                uint32_t flags = std::bit_cast<uint32_t>(kdNodeData[idx].data1.w);
+                bool isLeaf = (flags >> 31) != 0u;
+
+                if (isLeaf) {
+                    uint32_t cnt = flags & 0x1FFFFFFFu;
+                    ++leafCount;
+                    if (cnt == 0) ++emptyLeafCount;
+                    totalLeafDepth += d;
+                    totalLeafTris  += cnt;
+                    if (cnt > maxLeafTris) maxLeafTris = cnt;
+                    if (d > maxDepth) maxDepth = d;
+                } else {
+                    uint32_t lc = flags & 0x1FFFFFFFu;
+                    stk.push_back({lc,     d + 1u});
+                    stk.push_back({lc + 1, d + 1u});
+                }
+            }
+
+            float avgLeafDepth = leafCount > 0 ? static_cast<float>(totalLeafDepth) / leafCount : 0.f;
+            float avgLeafTris  = (leafCount - emptyLeafCount) > 0
+                ? static_cast<float>(totalLeafTris) / (leafCount - emptyLeafCount) : 0.f;
+            printf("  depth: max=%u avg=%.1f | leaves: %u (%u empty) | tris/leaf: avg=%.1f max=%u\n",
+                   maxDepth, avgLeafDepth, leafCount, emptyLeafCount, avgLeafTris,
+                   static_cast<uint32_t>(maxLeafTris));
+        }
     }
 
     // ── Vulkan setup (mirrors BVH.cpp) ───────────────────────────────────────────

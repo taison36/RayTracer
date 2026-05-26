@@ -12,9 +12,10 @@ namespace rt::gfx {
     //
     //  1. Exact SAH via event sweep — O(n log n)
     //     Split candidates are the actual triangle AABB boundaries (2N per axis),
-    //     not 8 fixed bins. Events are sorted and swept maintaining exact NL/NR
+    //     not fixed bins. Events are sorted and swept maintaining exact NL/NR
     //     counts, evaluating the true SAH cost at every candidate position.
-    //     No triangle clipping — raw AABBs are used throughout.
+    //     With spatial triangle splitting, events are at clipped fragment extents,
+    //     making cost estimates even more accurate at deeper levels.
     //
     //  2. Empty Space Cutting (Havran §4.4)
     //     Before the SAH sweep, the tight union AABB of all triangles is compared
