@@ -1,5 +1,5 @@
 #include "ExactSAHBuilderNoESC.h"
-#include "KDTree.h"
+#include "../KDTree.h"
 #include <algorithm>
 #include <bit>
 #include <limits>
@@ -102,14 +102,14 @@ namespace rt::gfx {
             float    parentSA = nodeBounds.surfaceArea();
             float    leafCost = static_cast<float>(N) * C_ISECT;
 
-            auto emitLeaf = [&]() {
+            auto makeLeaf = [&]() {
                 uint32_t first = static_cast<uint32_t>(outTriIndices.size());
                 for (const auto& inst : instances)
                     outTriIndices.push_back(inst.idx);
                 makeLeafNode(nodes[nodeIdx], nodeBounds, first, N);
             };
 
-            if (N <= MAX_LEAF_TRIS || depth >= MAX_DEPTH) { emitLeaf(); return; }
+            if (N <= MAX_LEAF_TRIS || depth >= MAX_DEPTH) { makeLeaf(); return; }
 
             // ── OSAH event sweep (Havran §4.2.3) ────────────────────────────────────
             int   bestAxis  = -1;
@@ -173,7 +173,7 @@ namespace rt::gfx {
             }
 
             // ── Choose: leaf or SAH split ────────────────────────────────────────────
-            if (bestAxis == -1 || leafCost <= bestCost) { emitLeaf(); return; }
+            if (bestAxis == -1 || leafCost <= bestCost) { makeLeaf(); return; }
 
             AABB leftBounds  = nodeBounds; leftBounds.max[bestAxis]  = bestSplit;
             AABB rightBounds = nodeBounds; rightBounds.min[bestAxis] = bestSplit;
@@ -198,7 +198,7 @@ namespace rt::gfx {
                 }
             }
 
-            if (leftInsts.empty() || rightInsts.empty()) { emitLeaf(); return; }
+            if (leftInsts.empty() || rightInsts.empty()) { makeLeaf(); return; }
 
             uint32_t leftIdx = static_cast<uint32_t>(nodes.size());
             nodes.emplace_back();

@@ -1,0 +1,134 @@
+@startuml 04_acceleration_structures
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam ArrowColor #555555
+skinparam ClassBorderColor #444444
+skinparam ClassBackgroundColor #FAFAFA
+skinparam PackageBorderColor #888888
+
+title Acceleration Structures — Overview
+
+' ── Interface ───────────────────────────
+abstract class AccelerationStruct {
+    + {abstract} build(vkCore : VkCore,\n               ctx : RendererContext,\n               outImg : OutputImage)
+    + {abstract} record(cmdBuf,\n                tileW, tileH,\n                sampleIndex,\n                offsetX, offsetY)
+    + {abstract} getSamplesPerPixel() : uint32_t
+    + {abstract} getTypeName()        : string
+}
+
+note top of AccelerationStruct
+  Each implementation owns its own
+  Vulkan descriptors, pipeline, and
+  GPU buffers. They share no state.
+end note
+
+' ── Shared GPU buffers (all impls) ──────
+package "Common GPU Buffers\n(held by every implementation)" as common {
+    class CommonBuffers <<logical group>> {
+        vertices        : Buffer
+        triangles       : Buffer
+        materials       : Buffer
+        textures        : TextureImage[]
+        directionalLights : Buffer
+        pointLights     : Buffer
+        spotLights      : Buffer
+        sceneSettings   : Buffer
+        accumBuffer     : Buffer
+    }
+}
+
+' ── Implementations ─────────────────────
+class BruteForce {
+    --
+    + build(...)
+    + record(...)
+    + getTypeName() : "BruteForce"
+    --
+    Tests every triangle per ray.
+    No spatial index.
+}
+
+class BVH {
+    - bvhNodes      : Buffer
+    - bvhTriIndices : Buffer
+    --
+    - buildBVH() : BVHNode[]
+    + build(...)
+    + record(...)
+    + getTypeName() : "BVH"
+    --
+    Midpoint-split hierarchy.
+    Fast build, moderate quality.
+}
+
+class SAHBVH {
+    - bvhNodes      : Buffer
+    - bvhTriIndices : Buffer
+    --
+    - buildBVH() : BVHNode[]
+    + build(...)
+    + record(...)
+    + getTypeName() : "SAH-BVH"
+    --
+    Surface Area Heuristic splits.
+    Better tree quality than midpoint.
+}
+
+class KDTree {
+    - kdNodes       : Buffer
+    - kdTriIndices  : Buffer
+    - builder       : unique_ptr<IKDTreeBuilder>
+    --
+    - buildKDTree() : KDNode[]
+    + build(...)
+    + record(...)
+    + getTypeName() : "KDTree"
+    --
+    Axis-aligned space partitioning.
+    Builder algorithm is pluggable.
+}
+
+' ── GPU node structs ────────────────────
+package "GPU Node Formats" {
+    class BVHNode <<GPU struct>> {
+        aabbMinLeft  : vec4
+        ' xyz = AABB min, w = left child index
+        aabbMaxCount : vec4
+        ' xyz = AABB max, w = tri count (leaf) / 0 (interior)
+    }
+
+    class KDNode <<GPU struct>> {
+        data0 : vec4
+        ' Interior: xyz=AABBmin, w=splitPos
+        ' Leaf:     xyz=AABBmin, w=firstTriIdx
+        data1 : vec4
+        ' Interior: xyz=AABBmax, w=pack(axis,leftChild,isLeaf=0)
+        ' Leaf:     xyz=AABBmax, w=pack(triCount,isLeaf=1)
+    }
+}
+
+' ── KD-Tree builder stub ────────────────
+interface IKDTreeBuilder <<see 06_kdtree>> {
+    + {abstract} build(triangles, vertices,\n               outNodes, outTriIndices)
+    + {abstract} getName() : string
+}
+
+' ── Relationships ───────────────────────
+AccelerationStruct <|-- BruteForce
+AccelerationStruct <|-- BVH
+AccelerationStruct <|-- SAHBVH
+AccelerationStruct <|-- KDTree
+
+BruteForce ..> CommonBuffers : owns
+BVH         ..> CommonBuffers : owns
+SAHBVH      ..> CommonBuffers : owns
+KDTree      ..> CommonBuffers : owns
+
+BVH    ..> BVHNode : uploads to GPU
+SAHBVH ..> BVHNode : uploads to GPU
+KDTree ..> KDNode  : uploads to GPU
+
+KDTree o-- IKDTreeBuilder : strategy
+
+@enduml

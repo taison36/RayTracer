@@ -1,0 +1,144 @@
+@startuml 05_bvh
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam ArrowColor #555555
+skinparam ClassBorderColor #444444
+skinparam ClassBackgroundColor #FAFAFA
+skinparam PackageBorderColor #888888
+skinparam NoteBackgroundColor #FFFDE7
+
+title BVH Acceleration Structures
+
+abstract class AccelerationStruct <<see 04_acceleration_structures>> {
+    + {abstract} build(...)
+    + {abstract} record(...)
+}
+
+' ── BVH ─────────────────────────────────
+class BVH {
+    ' Vulkan resources
+    - descriptorPool   : vk::DescriptorPool
+    - descriptorLayout : vk::DescriptorSetLayout
+    - staticSet        : vk::DescriptorSet
+    - bindlessSet      : vk::DescriptorSet
+    - pipeline         : vk::Pipeline
+    - pipelineLayout   : vk::PipelineLayout
+    ' Scene buffers
+    - vertexBuf        : Buffer
+    - triangleBuf      : Buffer
+    - materialBuf      : Buffer
+    - settingsBuf      : Buffer
+    - accumBuf         : Buffer
+    - lightBufs        : Buffer[3]
+    - textures         : TextureImage[]
+    ' BVH-specific
+    - bvhNodeBuf       : Buffer
+    - bvhTriIdxBuf     : Buffer
+    --
+    - buildBVH(triangles, vertices) : BVHNode[]
+    - buildNode(node, triIndices, depth)
+    - computeAABB(triIndices) : AABB
+    + build(vkCore, ctx, outImg)
+    + record(cmdBuf, tileW, tileH, sample, offX, offY)
+    + getTypeName() : "BVH"
+}
+
+note right of BVH
+  Split strategy: midpoint along
+  the longest AABB axis.
+  Fast O(n log n) build,
+  moderate traversal quality.
+end note
+
+' ── SAHBVH ──────────────────────────────
+class SAHBVH {
+    ' Vulkan resources
+    - descriptorPool   : vk::DescriptorPool
+    - descriptorLayout : vk::DescriptorSetLayout
+    - staticSet        : vk::DescriptorSet
+    - bindlessSet      : vk::DescriptorSet
+    - pipeline         : vk::Pipeline
+    - pipelineLayout   : vk::PipelineLayout
+    ' Scene buffers
+    - vertexBuf        : Buffer
+    - triangleBuf      : Buffer
+    - materialBuf      : Buffer
+    - settingsBuf      : Buffer
+    - accumBuf         : Buffer
+    - lightBufs        : Buffer[3]
+    - textures         : TextureImage[]
+    ' BVH-specific
+    - bvhNodeBuf       : Buffer
+    - bvhTriIdxBuf     : Buffer
+    --
+    - buildBVH(triangles, vertices) : BVHNode[]
+    - bestSAHSplit(node, triIndices) : SplitResult
+    - sahCost(leftCount, leftArea,\n           rightCount, rightArea,\n           parentArea) : float
+    + build(vkCore, ctx, outImg)
+    + record(cmdBuf, tileW, tileH, sample, offX, offY)
+    + getTypeName() : "SAH-BVH"
+}
+
+note right of SAHBVH
+  Split strategy: minimise
+  SAH cost = C_trav + (A_L/A_P)*N_L*C_isect
+                    + (A_R/A_P)*N_R*C_isect
+  Better tree quality at the cost
+  of a slower build.
+end note
+
+' ── GPU node format ─────────────────────
+package "GPU Node Format" {
+    class BVHNode <<GPU struct, 32 bytes>> {
+        aabbMinLeft  : vec4
+        ' xyz = AABB min corner
+        ' w   = left child index (interior)
+        '       or first tri index (leaf, w < 0)
+        aabbMaxCount : vec4
+        ' xyz = AABB max corner
+        ' w   = triangle count  (leaf)
+        '       or 0            (interior)
+    }
+
+    class BvhBuffer <<GPU buffer wrapper>> {
+        + nodes    : vector<BVHNode>
+        + triIndices : vector<uint32_t>
+    }
+}
+
+' ── CPU build helpers ───────────────────
+package "CPU Build Helpers" {
+    class AABB {
+        + min : vec3
+        + max : vec3
+        --
+        + surfaceArea() : float
+        + centroid()    : vec3
+        + extend(other : AABB)
+    }
+
+    class SplitResult {
+        + axis    : int
+        + pos     : float
+        + cost    : float
+        + leftCount  : int
+        + rightCount : int
+    }
+}
+
+' ── Relationships ───────────────────────
+AccelerationStruct <|-- BVH
+AccelerationStruct <|-- SAHBVH
+
+BVH    ..> BVHNode    : produces
+SAHBVH ..> BVHNode    : produces
+
+BVH    ..> BvhBuffer  : fills & uploads
+SAHBVH ..> BvhBuffer  : fills & uploads
+
+BVH    ..> AABB        : uses during build
+SAHBVH ..> AABB        : uses during build
+SAHBVH ..> SplitResult : uses during build
+
+@enduml

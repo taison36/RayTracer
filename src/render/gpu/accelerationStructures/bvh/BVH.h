@@ -1,14 +1,13 @@
 #pragma once
 #include "BVHShared.h"
-#include "AccelerationStructure.h"
+#include "../AccelerationStructure.h"
 
 namespace rt::gfx {
 
-    // SAH-BVH: Surface Area Heuristic BVH.
-    // Splits each node by evaluating NUM_BINS candidate planes per axis and
-    // choosing the one that minimises expected traversal cost (SAH).
-    // Better tree quality than midpoint BVH at the cost of a slower build.
-    class SAHBVH : public AccelerationStruct {
+    // Midpoint-split BVH. Splits each node at the midpoint of the longest axis.
+    // No cost evaluation — always splits until MAX_LEAF_TRIS is reached.
+    // Faster to build than SAH-BVH but produces a lower-quality tree.
+    class BVH : public AccelerationStruct {
         vk::raii::Pipeline                   pipeline{nullptr};
         vk::raii::PipelineLayout             pipelineLayout{nullptr};
 
@@ -49,12 +48,12 @@ namespace rt::gfx {
         void createPipeline(const VkCore& vkCore);
 
     public:
-        SAHBVH() = default;
+        BVH() = default;
         void build(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage) override;
         void record(const vk::CommandBuffer& cmb, uint32_t tileWidth, uint32_t tileHeight,
                     uint32_t sampleIndex, uint32_t tileOffsetX, uint32_t tileOffsetY) override;
         uint32_t getSamplesPerPixel() const override { return sceneSettings.samplesPerPixel; }
-        const std::string getTypeName() const override { return "SAH-BVH"; }
+        const std::string getTypeName() const override { return "BVH"; }
     };
 
 } // rt::gfx

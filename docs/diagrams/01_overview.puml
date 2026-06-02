@@ -1,0 +1,32 @@
+@startuml 01_overview
+skinparam linetype ortho
+skinparam ArrowColor #444444
+skinparam PackageBorderColor #777777
+skinparam PackageBackgroundColor #F5F5F5
+skinparam defaultTextAlignment center
+skinparam shadowing false
+skinparam rectangleBorderColor #777777
+skinparam rectangleFontSize 14
+skinparam arrowFontSize 11
+
+title GPU Ray Tracer — Big Picture
+
+rectangle "Application" as app #D6EAF8
+rectangle "Scene\n(geometry, lights, camera)" as scene #D5F5E3
+rectangle "FrameBuffer\n(pixel output)" as fb #D5F5E3
+rectangle "Renderer\n(Vulkan compute)" as renderer #FEF9E7
+rectangle "AccelerationStruct\n«interface»" as accel #FDEDEC
+app --> scene    : loads
+app --> renderer : runs
+app --> fb       : saves as PPM
+
+renderer --> accel : build + record tiles
+renderer --> fb    : writes pixels
+
+note right of accel
+  Implementations:
+  BruteForce · BVH
+  SAH-BVH · KDTree
+end note
+
+@enduml

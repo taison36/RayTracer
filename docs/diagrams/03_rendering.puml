@@ -1,0 +1,126 @@
+@startuml 03_rendering
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam ArrowColor #555555
+skinparam ClassBorderColor #444444
+skinparam ClassBackgroundColor #FAFAFA
+skinparam PackageBorderColor #888888
+
+title Rendering Layer
+
+' ── Application side ────────────────────
+class RayTracerApplication {
+    - screenSettings : SceneSettings
+    - buffer         : FrameBuffer
+    - renderer       : Renderer
+    - scene          : Scene
+    --
+    + run()
+    + save_as_ppm(filename : string)
+}
+
+class SceneSettings {
+    + WIDTH  : uint32_t
+    + HEIGHT : uint32_t
+    + FOV    : float
+    + maxBounces             : uint32_t
+    + samplesPerPixel        : uint32_t
+    + samplesPerEmissiveLight: uint32_t
+}
+
+class RendererContext {
+    + scene          : const Scene*
+    + screenSettings : const SceneSettings*
+}
+
+class Scene <<see 02_core>>
+class FrameBuffer <<see 02_core>>
+
+' ── Renderer ────────────────────────────
+class Renderer {
+    - vkCore      : VkCore
+    - accelStruct : unique_ptr<AccelerationStruct>
+    --
+    + run(ctx : RendererContext, fb : FrameBuffer)
+    - createOutputImage(ctx) : OutputImage
+    - tileLoop(ctx, outputImage)
+}
+
+note right of Renderer
+  For each sample index 0..N:
+    For each 64×64 tile:
+      accelStruct->record(cmdBuf, tile, sample)
+      submit → wait → next tile
+  Avoids GPU timeout on large scenes.
+end note
+
+' ── Vulkan core ─────────────────────────
+class VkCore {
+    - instance       : vk::raii::Instance
+    - device         : vk::raii::Device
+    - physicalDevice : vk::raii::PhysicalDevice
+    - queue          : vk::raii::Queue
+    - commandPool    : vk::raii::CommandPool
+    --
+    + beginSingleTimeCommands() : CommandBuffer
+    + endSingleTimeCommands(cb)
+    + createBuffer(size, usage, memProps) : Buffer
+    + fillBuffer(buffer, data, size)
+    + createShaderModule(spirv) : ShaderModule
+    + transitionImageLayout(image, oldLayout, newLayout)
+    + copyBufferToImage(buffer, image, w, h)
+    + copyImageToBuffer(image, buffer, w, h)
+    + findMemoryType(filter, props) : uint32_t
+    --
+    + getDevice()         : vk::Device
+    + getPhysicalDevice() : vk::PhysicalDevice
+    + getQueueFamilyIndex(): uint32_t
+}
+
+' ── GPU memory wrappers ─────────────────
+package "GPU Memory" {
+    class Buffer {
+        + buffer : vk::Buffer
+        + memory : vk::DeviceMemory
+    }
+
+    class TextureImage {
+        + image  : vk::Image
+        + view   : vk::ImageView
+        + memory : vk::DeviceMemory
+        + sampler: vk::Sampler
+    }
+
+    class OutputImage {
+        + image  : vk::raii::Image
+        + view   : vk::raii::ImageView
+        + memory : vk::raii::DeviceMemory
+    }
+}
+
+' ── AccelerationStruct stub ─────────────
+abstract class AccelerationStruct <<see 04_acceleration_structure>> {
+    + {abstract} build(vkCore, ctx, outImg)
+    + {abstract} record(cmdBuf, tileW, tileH, sample, offX, offY)
+}
+
+' ── Relationships ───────────────────────
+RayTracerApplication *-- SceneSettings
+RayTracerApplication *-- FrameBuffer
+RayTracerApplication *-- Renderer
+RayTracerApplication ..> RendererContext : constructs
+
+RendererContext --> Scene
+RendererContext --> SceneSettings
+
+Renderer *-- VkCore
+Renderer o-- AccelerationStruct
+Renderer ..> RendererContext : uses
+Renderer ..> FrameBuffer    : writes pixels into
+Renderer ..> OutputImage    : creates & reads back
+
+VkCore ..> Buffer       : creates
+VkCore ..> TextureImage : creates
+
+@enduml

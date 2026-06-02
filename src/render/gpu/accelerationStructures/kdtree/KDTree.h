@@ -5,8 +5,8 @@
 #include <vulkan/vulkan_core.h>
 #include <glm/glm.hpp>
 #include <memory>
-#include "AccelerationStructure.h"
-#include "KDTreeBuilder.h"
+#include "../AccelerationStructure.h"
+#include "builder/BinnedSHABuilder.h"
 
 namespace rt::gfx {
 #ifndef MAX_TEXTURE_NUMBER

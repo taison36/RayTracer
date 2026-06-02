@@ -1,0 +1,363 @@
+@startuml architecture
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam ArrowColor #555555
+skinparam ClassBorderColor #444444
+skinparam ClassBackgroundColor #FAFAFA
+skinparam NoteBackgroundColor #FFFDE7
+skinparam PackageBorderColor #888888
+
+title GPU Ray Tracer — Architecture
+
+' ─────────────────────────────────────────
+' Entry / Application
+' ─────────────────────────────────────────
+package "Application" {
+    class main <<entry point>> {
+        + main() : int
+    }
+
+    class RayTracerApplication {
+        - screenSettings : SceneSettings
+        - buffer : FrameBuffer
+        - renderer : Renderer
+        - scene : Scene
+        --
+        + run()
+        + save_as_ppm(filename : string)
+    }
+}
+
+' ─────────────────────────────────────────
+' Core Data / Scene
+' ─────────────────────────────────────────
+package "Core" {
+    class Scene {
+        + vertices  : vector<Vertex>
+        + triangles : vector<Triangle>
+        + materials : vector<Material>
+        + textures  : vector<Texture>
+        + emissiveLight : vector<uint32_t>
+        + directionalLight : vector<DirectionalLight>
+        + pointLight  : vector<PointLight>
+        + spotLight   : vector<SpotLight>
+        + camera : Camera
+    }
+
+    class SceneBuilder {
+        + addVertex(v : Vertex)
+        + addTriangle(t : Triangle)
+        + addMaterial(m : Material)
+        + addTexture(t : Texture)
+        + setCamera(c : Camera)
+        + build() : Scene
+    }
+
+    class FrameBuffer {
+        - pixels : vector<Color>
+        + COLS : uint32_t
+        + ROWS : uint32_t
+        --
+        + operator[](row) : Color*
+        + begin() / end()
+    }
+
+    class SceneLoader <<utility>> {
+        + {static} loadScene(path : string) : Scene
+    }
+}
+
+' ─────────────────────────────────────────
+' Object / Value types
+' ─────────────────────────────────────────
+package "Objects" {
+    class Camera {
+        - position : vec3
+        - front, right, up : vec3
+        - yaw, pitch, zoom : float
+        --
+        + getView() : mat4
+        + getProjection() : mat4
+        + getPosition() : vec3
+    }
+
+    class SceneSettings {
+        + WIDTH  : uint32_t
+        + HEIGHT : uint32_t
+        + FOV    : float
+        + maxBounces : uint32_t
+        + samplesPerPixel : uint32_t
+        + samplesPerEmissiveLight : uint32_t
+    }
+
+    class Color {
+        + r, g, b, a : float
+    }
+
+    class Vertex {
+        + position : vec4
+        + normal   : vec4
+        + tangent  : vec4
+        + texCoord : array<vec4,16>
+    }
+
+    class Triangle {
+        + indices  : array<uint32_t,3>
+        + material : uint32_t
+    }
+
+    class Material {
+        + emissiveFactor : vec4
+        + baseColorFactor : vec4
+        + metallicFactor  : float
+        + roughnessFactor : float
+    }
+
+    class Texture {
+        + width, height : uint32_t
+        + data : vector<uint8_t>
+        + minFilter, magFilter : Filter
+        + wrapU, wrapV : WrapMode
+    }
+
+    class DirectionalLight {
+        + color     : vec4
+        + direction : vec4
+        + intensity : float
+        + range     : float
+    }
+
+    class PointLight {
+        + position  : vec4
+        + color     : vec4
+        + intensity : float
+        + range     : float
+    }
+
+    class SpotLight {
+        + position  : vec4
+        + color     : vec4
+        + direction : vec4
+        + intensity : float
+        + innerAngle, outerAngle : float
+    }
+}
+
+' ─────────────────────────────────────────
+' Renderer Context (bridge between App and Renderer)
+' ─────────────────────────────────────────
+class RendererContext {
+    + scene          : const Scene*
+    + screenSettings : const SceneSettings*
+}
+
+' ─────────────────────────────────────────
+' Rendering / GPU
+' ─────────────────────────────────────────
+package "Rendering" {
+    class Renderer {
+        - vkCore      : VkCore
+        - accelStruct : unique_ptr<AccelerationStruct>
+        --
+        + run(ctx : RendererContext, fb : FrameBuffer)
+        - createOutputImage(ctx) : OutputImage
+    }
+
+    class VkCore {
+        - instance       : vk::Instance
+        - device         : vk::Device
+        - physicalDevice : vk::PhysicalDevice
+        - queue          : vk::Queue
+        - commandPool    : vk::CommandPool
+        --
+        + beginSingleTimeCommands() : CommandBuffer
+        + endSingleTimeCommands(cb)
+        + createBuffer(size, usage, props) : Buffer
+        + fillBuffer(buffer, data)
+        + createShaderModule(spv) : ShaderModule
+        + transitionImageLayout(...)
+        + copyImageToBuffer(...)
+    }
+
+    class OutputImage {
+        + image  : vk::Image
+        + view   : vk::ImageView
+        + memory : vk::DeviceMemory
+    }
+}
+
+' ─────────────────────────────────────────
+' Acceleration Structures
+' ─────────────────────────────────────────
+package "Acceleration Structures" {
+    abstract class AccelerationStruct {
+        + {abstract} build(vkCore, ctx, outImg)
+        + {abstract} record(cmdBuf, tileW, tileH, sample, offX, offY)
+        + {abstract} getSamplesPerPixel() : uint32_t
+        + {abstract} getTypeName() : string
+    }
+
+    class BruteForce {
+        - vertices, triangles : Buffer
+        - materials, lights   : Buffer
+        - accumBuffer         : Buffer
+        --
+        + build(...)
+        + record(...)
+        + getTypeName() : "BruteForce"
+    }
+
+    class BVH {
+        - bvhNodes     : Buffer
+        - bvhTriIndices: Buffer
+        --
+        - buildBVH(triangles, vertices) : BVHNode[]
+        + build(...)
+        + record(...)
+        + getTypeName() : "BVH"
+    }
+
+    class SAHBVH {
+        - bvhNodes     : Buffer
+        - bvhTriIndices: Buffer
+        --
+        - buildBVH(triangles, vertices) : BVHNode[]
+        + build(...)
+        + record(...)
+        + getTypeName() : "SAH-BVH"
+    }
+
+    class KDTree {
+        - kdNodes      : Buffer
+        - kdTriIndices : Buffer
+        - builder      : unique_ptr<IKDTreeBuilder>
+        --
+        - buildKDTree(triangles, vertices) : KDNode[]
+        + build(...)
+        + record(...)
+        + getTypeName() : "KDTree"
+    }
+
+    class BVHNode <<GPU struct>> {
+        + aabbMinLeft  : vec4
+        + aabbMaxCount : vec4
+    }
+
+    class KDNode <<GPU struct>> {
+        + data0 : vec4
+        + data1 : vec4
+    }
+}
+
+' ─────────────────────────────────────────
+' KD-Tree Builders (Strategy Pattern)
+' ─────────────────────────────────────────
+package "KD-Tree Builders" {
+    interface IKDTreeBuilder {
+        + {abstract} build(triangles, vertices, outNodes, outTriIndices)
+        + {abstract} getName() : string
+    }
+
+    class BinnedSAHBuilder {
+        - NUM_BINS : int = 8
+        --
+        + build(...)
+        + getName() : "BinnedSAH"
+    }
+
+    class ExactSAHBuilder {
+        + build(...)
+        + getName() : "ExactSAH"
+    }
+
+    class ExactSAHBuilderNoESC {
+        + build(...)
+        + getName() : "ExactSAH-NoESC"
+    }
+}
+
+' ─────────────────────────────────────────
+' Relationships
+' ─────────────────────────────────────────
+
+' Application layer
+main ..> RayTracerApplication : creates & runs
+
+RayTracerApplication *-- SceneSettings
+RayTracerApplication *-- FrameBuffer
+RayTracerApplication *-- Renderer
+RayTracerApplication --> SceneLoader : uses
+RayTracerApplication ..> RendererContext : constructs
+
+SceneLoader ..> SceneBuilder : uses
+SceneBuilder ..> Scene : builds
+
+' Scene contains data types
+Scene *-- "0..*" Vertex
+Scene *-- "0..*" Triangle
+Scene *-- "0..*" Material
+Scene *-- "0..*" Texture
+Scene *-- "0..*" DirectionalLight
+Scene *-- "0..*" PointLight
+Scene *-- "0..*" SpotLight
+Scene *-- Camera
+
+FrameBuffer *-- "0..*" Color
+
+RendererContext --> Scene
+RendererContext --> SceneSettings
+
+' Renderer
+Renderer *-- VkCore
+Renderer o-- AccelerationStruct
+Renderer ..> OutputImage : creates
+Renderer ..> RendererContext : uses
+Renderer ..> FrameBuffer : writes
+
+' Acceleration structure hierarchy
+AccelerationStruct <|-- BruteForce
+AccelerationStruct <|-- BVH
+AccelerationStruct <|-- SAHBVH
+AccelerationStruct <|-- KDTree
+
+BVH ..> BVHNode : produces
+SAHBVH ..> BVHNode : produces
+KDTree ..> KDNode : produces
+
+' KD-Tree builder strategy
+KDTree o-- IKDTreeBuilder
+IKDTreeBuilder <|.. BinnedSAHBuilder
+IKDTreeBuilder <|.. ExactSAHBuilder
+IKDTreeBuilder <|.. ExactSAHBuilderNoESC
+
+' All accel structs use VkCore
+AccelerationStruct ..> VkCore : uses
+AccelerationStruct ..> OutputImage : uses
+
+note bottom of BinnedSAHBuilder
+  8-bin spatial sweep
+  O(n * BINS) per level
+  Fast build
+end note
+
+note bottom of ExactSAHBuilder
+  Event-sweep SAH
+  Empty-space cutting (ESC)
+  O(n log n) — best quality
+end note
+
+note bottom of ExactSAHBuilderNoESC
+  Exact SAH
+  No ESC — isolates
+  ESC effect on quality
+end note
+
+note right of Renderer
+  Tile-based rendering loop
+  (64 × 64 px tiles).
+  Dispatches compute shader
+  per tile per sample.
+end note
+
+@enduml

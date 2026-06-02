@@ -1,0 +1,166 @@
+@startuml 02_core
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam ArrowColor #555555
+skinparam ClassBorderColor #444444
+skinparam ClassBackgroundColor #FAFAFA
+skinparam PackageBorderColor #888888
+
+title Core Layer
+
+' ── Scene ───────────────────────────────
+class Scene {
+    + vertices          : vector<Vertex>
+    + triangles         : vector<Triangle>
+    + materials         : vector<Material>
+    + textures          : vector<Texture>
+    + emissiveLight     : vector<uint32_t>
+    + directionalLight  : vector<DirectionalLight>
+    + pointLight        : vector<PointLight>
+    + spotLight         : vector<SpotLight>
+    + camera            : Camera
+}
+
+class SceneBuilder {
+    + addVertex(v : Vertex)
+    + addTriangle(t : Triangle)
+    + addMaterial(m : Material)
+    + addTexture(t : Texture)
+    + addDirectionalLight(l)
+    + addPointLight(l)
+    + addSpotLight(l)
+    + setCamera(c : Camera)
+    --
+    + build() : Scene
+}
+
+class SceneLoader <<utility>> {
+    + {static} loadScene(path : string) : Scene
+}
+
+class FrameBuffer {
+    - pixels : vector<Color>
+    + COLS   : uint32_t
+    + ROWS   : uint32_t
+    --
+    + operator[](row) : Color*
+    + begin() / end()
+}
+
+' ── Geometry ────────────────────────────
+package "Geometry" {
+    class Vertex <<16-byte aligned>> {
+        + position : vec4
+        + normal   : vec4
+        + tangent  : vec4
+        + texCoord : array<vec4, 16>
+    }
+
+    class Triangle <<16-byte aligned>> {
+        + indices  : array<uint32_t, 3>
+        + material : uint32_t
+    }
+}
+
+' ── Materials & Textures ────────────────
+package "Materials" {
+    class Material <<16-byte aligned>> {
+        + emissiveFactor   : vec4
+        + baseColorFactor  : vec4
+        + metallicFactor   : float
+        + roughnessFactor  : float
+        + baseColorTexture         : TextureInfo
+        + metallicRoughnessTexture : TextureInfo
+        + emissiveTexture          : TextureInfo
+    }
+
+    class Texture {
+        + width, height : uint32_t
+        + data          : vector<uint8_t>
+        + minFilter, magFilter : Filter
+        + mipmapMode           : Filter
+        + wrapU, wrapV         : WrapMode
+    }
+
+    class TextureInfo {
+        + index    : int
+        + texCoord : int
+    }
+}
+
+' ── Camera ──────────────────────────────
+class Camera {
+    - position         : vec3
+    - front, right, up : vec3
+    - worldUp          : vec3
+    - yaw, pitch, zoom : float
+    --
+    + getView()       : mat4
+    + getProjection() : mat4
+    + getPosition()   : vec3
+    + getZoom()       : float
+}
+
+class Camera::Builder {
+    + withPosition(p : vec3)
+    + withTarget(t : vec3)
+    + withFov(fov : float)
+    + build() : Camera
+}
+
+' ── Lights ──────────────────────────────
+package "Lights" {
+    class DirectionalLight <<16-byte aligned>> {
+        + color     : vec4
+        + direction : vec4
+        + intensity : float
+        + range     : float
+    }
+
+    class PointLight <<16-byte aligned>> {
+        + position  : vec4
+        + color     : vec4
+        + intensity : float
+        + range     : float
+    }
+
+    class SpotLight <<16-byte aligned>> {
+        + position   : vec4
+        + color      : vec4
+        + direction  : vec4
+        + intensity  : float
+        + range      : float
+        + innerAngle : float
+        + outerAngle : float
+    }
+}
+
+' ── Value types ─────────────────────────
+class Color {
+    + r, g, b, a : float
+    --
+    + operator*(scalar)
+    + operator+(Color)
+}
+
+' ── Relationships ───────────────────────
+SceneLoader ..> SceneBuilder : uses
+SceneBuilder ..> Scene       : builds
+
+Scene *-- "0..*" Vertex
+Scene *-- "0..*" Triangle
+Scene *-- "0..*" Material
+Scene *-- "0..*" Texture
+Scene *-- "0..*" DirectionalLight
+Scene *-- "0..*" PointLight
+Scene *-- "0..*" SpotLight
+Scene *-- "1"    Camera
+
+Material *-- "0..3" TextureInfo
+
+Camera +-- Camera::Builder
+
+FrameBuffer *-- "0..*" Color
+
+@enduml

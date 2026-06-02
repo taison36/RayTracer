@@ -1,5 +1,5 @@
 #include "ExactSAHBuilder.h"
-#include "KDTree.h"
+#include "../KDTree.h"
 #include <algorithm>
 #include <bit>
 #include <limits>
@@ -117,14 +117,14 @@ namespace rt::gfx {
             float    parentSA = nodeBounds.surfaceArea();
             float    leafCost = static_cast<float>(N) * C_ISECT;
 
-            auto emitLeaf = [&]() {
+            auto makeLeaf = [&]() {
                 uint32_t first = static_cast<uint32_t>(outTriIndices.size());
                 for (const auto& inst : instances)
                     outTriIndices.push_back(inst.idx);
                 makeLeafNode(nodes[nodeIdx], nodeBounds, first, N);
             };
 
-            if (N <= MAX_LEAF_TRIS || depth >= MAX_DEPTH) { emitLeaf(); return; }
+            if (N <= MAX_LEAF_TRIS || depth >= MAX_DEPTH) { makeLeaf(); return; }
 
             // ── Phase 1: Empty Space Cutting (Havran §4.4) ───────────────────────────
             // Compute the tight union AABB from per-instance (clipped) bounds.
@@ -219,9 +219,9 @@ namespace rt::gfx {
                 size_t   i  = 0;
 
                 while (i < events.size()) {
-                    float    pos    = events[i].pos;
-                    uint32_t pEnd   = 0, pStart = 0;
-                    size_t   j      = i;
+                    float    pos  = events[i].pos;
+                    uint32_t pEnd = 0, pStart = 0;
+                    size_t   j    = i;
 
                     while (j < events.size() && events[j].pos == pos) {
                         if (events[j].type == Ev::END) pEnd++;
@@ -252,7 +252,7 @@ namespace rt::gfx {
             float emptyCost = (bestEmptyAxis != -1) ? bestEmptyCost : std::numeric_limits<float>::max();
             float sahCost   = (bestSAHAxis   != -1) ? bestSAHCost   : std::numeric_limits<float>::max();
 
-            if (leafCost <= std::min(emptyCost, sahCost)) { emitLeaf(); return; }
+            if (leafCost <= std::min(emptyCost, sahCost)) { makeLeaf(); return; }
 
             if (emptyCost < sahCost) {
                 // ── Empty space cut ───────────────────────────────────────────────────
@@ -349,7 +349,7 @@ namespace rt::gfx {
                 }
             }
 
-            if (leftInsts.empty() || rightInsts.empty()) { emitLeaf(); return; }
+            if (leftInsts.empty() || rightInsts.empty()) { makeLeaf(); return; }
 
             uint32_t leftIdx = static_cast<uint32_t>(nodes.size());
             nodes.emplace_back();

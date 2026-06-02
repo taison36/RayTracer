@@ -1,5 +1,5 @@
-#include "KDTreeBuilder.h"
-#include "KDTree.h"
+#include "BinnedSHABuilder.h"
+#include "../KDTree.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -121,16 +121,16 @@ namespace rt::gfx {
                        const std::vector<rt::Vertex>&    verts,
                        uint32_t depth)
         {
-            uint32_t count = static_cast<uint32_t>(instances.size());
+            uint32_t N = static_cast<uint32_t>(instances.size());
 
             auto makeLeaf = [&]() {
                 uint32_t first = static_cast<uint32_t>(outTriIndices.size());
                 for (const auto& inst : instances)
                     outTriIndices.push_back(inst.idx);
-                makeKDLeaf(nodes[nodeIdx], nodeBounds, first, count);
+                makeKDLeaf(nodes[nodeIdx], nodeBounds, first, N);
             };
 
-            if (count <= MAX_LEAF_TRIS || depth >= MAX_DEPTH) { makeLeaf(); return; }
+            if (N <= MAX_LEAF_TRIS || depth >= MAX_DEPTH) { makeLeaf(); return; }
 
             int   bestAxis  = -1;
             float bestCost  = std::numeric_limits<float>::max();
@@ -176,14 +176,14 @@ namespace rt::gfx {
                 }
             }
 
-            if (bestAxis == -1 || bestCost >= static_cast<float>(count)) { makeLeaf(); return; }
+            if (bestAxis == -1 || bestCost >= static_cast<float>(N)) { makeLeaf(); return; }
 
             AABB leftChildBounds  = nodeBounds; leftChildBounds.max[bestAxis]  = bestSplit;
             AABB rightChildBounds = nodeBounds; rightChildBounds.min[bestAxis] = bestSplit;
 
             std::vector<TriInstance> leftInsts, rightInsts;
-            leftInsts.reserve(count);
-            rightInsts.reserve(count);
+            leftInsts.reserve(N);
+            rightInsts.reserve(N);
 
             for (const auto& inst : instances) {
                 const bool goLeft  = inst.bounds.min[bestAxis] <  bestSplit;

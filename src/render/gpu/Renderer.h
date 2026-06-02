@@ -1,5 +1,5 @@
 #pragma once
-#include "AccelerationStructure.h"
+#include "accelerationStructures/AccelerationStructure.h"
 #include "../../objects/UtilObjects.h"
 #include "../../core/FrameBuffer.h"
 #include "VkCore.h"

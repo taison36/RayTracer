@@ -1,0 +1,155 @@
+@startuml 06_kdtree
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam ArrowColor #555555
+skinparam ClassBorderColor #444444
+skinparam ClassBackgroundColor #FAFAFA
+skinparam PackageBorderColor #888888
+skinparam NoteBackgroundColor #FFFDE7
+
+title KD-Tree Acceleration Structure
+
+' ── KDTree (AccelerationStruct impl) ────
+abstract class AccelerationStruct <<see 04_acceleration_structures>> {
+    + {abstract} build(...)
+    + {abstract} record(...)
+}
+
+class KDTree {
+    ' Vulkan resources
+    - descriptorPool   : vk::DescriptorPool
+    - descriptorLayout : vk::DescriptorSetLayout
+    - staticSet        : vk::DescriptorSet
+    - bindlessSet      : vk::DescriptorSet
+    - pipeline         : vk::Pipeline
+    - pipelineLayout   : vk::PipelineLayout
+    ' Scene buffers
+    - vertexBuf        : Buffer
+    - triangleBuf      : Buffer
+    - materialBuf      : Buffer
+    - settingsBuf      : Buffer
+    - accumBuf         : Buffer
+    - lightBufs        : Buffer[3]
+    - textures         : TextureImage[]
+    ' KD-Tree specific
+    - kdNodeBuf        : Buffer
+    - kdTriIdxBuf      : Buffer
+    - builder          : unique_ptr<IKDTreeBuilder>
+    --
+    - buildKDTree(triangles, vertices)
+    + build(vkCore, ctx, outImg)
+    + record(cmdBuf, tileW, tileH, sample, offX, offY)
+    + getTypeName() : string
+}
+
+' ── Builder interface ────────────────────
+interface IKDTreeBuilder {
+    + {abstract} build(triangles     : vector<Triangle>,\n               vertices      : vector<Vertex>,\n               outNodes      : vector<KDNode>&,\n               outTriIndices : vector<uint32_t>&)
+    + {abstract} getName() : string
+}
+
+note top of IKDTreeBuilder
+  Strategy pattern — swap the builder
+  to compare build strategies without
+  changing the GPU traversal code.
+end note
+
+' ── Concrete builders ────────────────────
+class BinnedSAHBuilder {
+    - NUM_BINS : int = 8
+    --
+    + build(...)
+    + getName() : "BinnedSAH"
+    --
+    Divides each axis into 8 fixed bins.
+    Evaluates SAH cost per bin boundary.
+    Clips triangles to bin extents.
+    O(n × BINS) per level — fast build.
+}
+
+class ExactSAHBuilder {
+    --
+    + build(...)
+    + getName() : "ExactSAH"
+    --
+    Event-sweep over triangle endpoints.
+    Empty-space cutting (Havran §4.4):
+    splits node if one child is empty
+    and the cut is cost-effective.
+    O(n log n) — best tree quality.
+}
+
+class ExactSAHBuilderNoESC {
+    --
+    + build(...)
+    + getName() : "ExactSAH-NoESC"
+    --
+    Exact SAH event-sweep,
+    empty-space cutting disabled.
+    Used to isolate the effect
+    of ESC on render performance.
+}
+
+' ── GPU node format ─────────────────────
+package "GPU Node Format" {
+    class KDNode <<GPU struct, 32 bytes>> {
+        data0 : vec4
+        data1 : vec4
+    }
+
+    note right of KDNode
+      Interior node:
+        data0.xyz = AABB min
+        data0.w   = split position
+        data1.xyz = AABB max
+        data1.w   = pack(splitAxis[2] | leftChildIdx[29] | isLeaf=0[1])
+
+      Leaf node:
+        data0.xyz = AABB min
+        data0.w   = first triangle index
+        data1.xyz = AABB max
+        data1.w   = pack(triCount[31] | isLeaf=1[1])
+    end note
+}
+
+' ── CPU build helpers ───────────────────
+package "CPU Build Helpers" {
+    class KDEvent {
+        + pos   : float
+        + type  : EventType
+        + triIdx: uint32_t
+    }
+
+    enum EventType {
+        START
+        END
+        PLANAR
+    }
+
+    class KDSplitCandidate {
+        + axis : int
+        + pos  : float
+        + cost : float
+    }
+}
+
+' ── Relationships ───────────────────────
+AccelerationStruct <|-- KDTree
+
+KDTree o-- IKDTreeBuilder : «strategy»
+
+IKDTreeBuilder <|.. BinnedSAHBuilder
+IKDTreeBuilder <|.. ExactSAHBuilder
+IKDTreeBuilder <|.. ExactSAHBuilderNoESC
+
+IKDTreeBuilder ..> KDNode : produces
+
+ExactSAHBuilder    ..> KDEvent          : uses
+ExactSAHBuilder    ..> KDSplitCandidate : uses
+ExactSAHBuilderNoESC ..> KDEvent        : uses
+ExactSAHBuilderNoESC ..> KDSplitCandidate : uses
+
+KDEvent *-- EventType
+
+@enduml

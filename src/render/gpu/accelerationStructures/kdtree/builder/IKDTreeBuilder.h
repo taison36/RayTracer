@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include <string>
-#include "../../core/Scene.h"
+#include "../../../../../core/Scene.h"
 
 // Forward-declared GPU types (defined in KDTree.h)
 namespace rt::gfx {

@@ -7,16 +7,15 @@ set(Raytracer_SRC
 
     objects/Camera.cpp
 
-        render/gpu/Checker.cpp
-    render/gpu/Renderer.cpp
+        render/gpu/Renderer.cpp
     render/gpu/VkCore.cpp
-    render/gpu/BruteForce.cpp
-    render/gpu/BVH.cpp
-    render/gpu/SAHBVH.cpp
-    render/gpu/KDTree.cpp
-    render/gpu/KDTreeBuilder.cpp
-    render/gpu/ExactSAHBuilder.cpp
-    render/gpu/ExactSAHBuilderNoESC.cpp
+        render/gpu/accelerationStructures/BruteForce.cpp
+        render/gpu/accelerationStructures/bvh/BVH.cpp
+        render/gpu/accelerationStructures/bvh/SAHBVH.cpp
+        render/gpu/accelerationStructures/kdtree/KDTree.cpp
+        render/gpu/accelerationStructures/kdtree/builder/BinnedSHABuilder.cpp
+        render/gpu/accelerationStructures/kdtree/builder/ExactSAHBuilder.cpp
+        render/gpu/accelerationStructures/kdtree/builder/ExactSAHBuilderNoESC.cpp
 
     utils/SceneLoader.cpp
     utils/utils.cpp
