@@ -1,4 +1,4 @@
-@startuml 04_acceleration_structures
+@startuml 05_acceleration_structures
 skinparam linetype ortho
 skinparam classAttributeIconSize 0
 skinparam packageStyle rectangle
