@@ -11,7 +11,8 @@ set(Raytracer_SRC
     render/gpu/VkCore.cpp
         render/gpu/accelerationStructures/BruteForce.cpp
         render/gpu/accelerationStructures/bvh/BVH.cpp
-        render/gpu/accelerationStructures/bvh/SAHBVH.cpp
+        render/gpu/accelerationStructures/bvh/builder/MiddlePointBuilder.cpp
+        render/gpu/accelerationStructures/bvh/builder/SAHBuilder.cpp
         render/gpu/accelerationStructures/kdtree/KDTree.cpp
         render/gpu/accelerationStructures/kdtree/builder/BinnedSHABuilder.cpp
         render/gpu/accelerationStructures/kdtree/builder/ExactSAHBuilder.cpp

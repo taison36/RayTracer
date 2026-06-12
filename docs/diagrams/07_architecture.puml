@@ -1,5 +1,5 @@
 @startuml 07_architecture
-skinparam linetype ortho
+skinparam linetype polyline
 skinparam classAttributeIconSize 0
 skinparam packageStyle rectangle
 skinparam ArrowColor #555555
@@ -11,82 +11,41 @@ title GPU Ray Tracer — Architecture
 
 ' ── Application ─────────────────────────
 package "Application" {
-    class RayTracerApplication {
-        - scene          : Scene
-        - screenSettings : SceneSettings
-        - buffer         : FrameBuffer
-        - renderer       : Renderer
-        --
-        + run()
-        + save_as_ppm()
-    }
+    class RayTracerApplication
 }
 
 ' ── Core ────────────────────────────────
 package "Core" {
-    class Scene {
-        + vertices   : vector<Vertex>
-        + triangles  : vector<Triangle>
-        + materials  : vector<Material>
-        + textures   : vector<Texture>
-        + lights     : DirectionalLight / PointLight / SpotLight
-        + camera     : Camera
-    }
-
-    class FrameBuffer {
-        + pixels : vector<Color>
-        --
-        + operator[](row) : Color*
-    }
-
-    class SceneLoader <<utility>> {
-        + {static} loadScene(path) : Scene
-    }
+    class Scene
+    class FrameBuffer
+    class SceneLoader <<utility>>
 }
 
 ' ── Rendering ───────────────────────────
 package "Rendering" {
-    class RendererContext {
-        + scene          : const Scene*
-        + screenSettings : const SceneSettings*
-    }
-
-    class Renderer {
-        - vkCore      : VkCore
-        - accelStruct : AccelerationStruct
-        --
-        + run(ctx, fb)
-    }
-
-    class VkCore {
-        + device, queue, commandPool
-        --
-        + createBuffer()
-        + beginSingleTimeCommands()
-        + transitionImageLayout()
-    }
+    class RendererContext
+    class Renderer
+    class VkCore
 }
 
 ' ── Acceleration Structures ─────────────
 package "Acceleration Structures" {
-    abstract class AccelerationStruct {
-        + {abstract} build(vkCore, ctx, outputImage)
-        + {abstract} record(cmdBuf, tile, sample)
-    }
-
+    abstract class AccelerationStruct
     class BruteForce
-    class BVH
-    class SAHBVH
-    class KDTree {
-        - builder : IKDTreeBuilder
+
+    together {
+        class BVH
+        interface IBVHBuilder
+        class MiddlePointBuilder
+        class SAHBuilder
     }
 
-    interface IKDTreeBuilder {
-        + {abstract} build(triangles, vertices, outNodes, outIndices)
+    together {
+        class KDTree
+        interface IKDTreeBuilder
+        class BinnedSAHBuilder
+        class ExactSAHBuilder
     }
-
-    class BinnedSAHBuilder
-    class ExactSAHBuilder
 }
 
 ' ── Relationships ───────────────────────
@@ -96,7 +55,6 @@ RayTracerApplication *-- Renderer
 RayTracerApplication ..> RendererContext : constructs
 
 SceneLoader ..> Scene : produces
-
 RendererContext --> Scene
 
 Renderer *-- VkCore
@@ -106,8 +64,11 @@ Renderer ..> FrameBuffer    : writes
 
 AccelerationStruct <|-- BruteForce
 AccelerationStruct <|-- BVH
-AccelerationStruct <|-- SAHBVH
 AccelerationStruct <|-- KDTree
+
+BVH o-- IBVHBuilder
+IBVHBuilder <|.. MiddlePointBuilder
+IBVHBuilder <|.. SAHBuilder
 
 KDTree o-- IKDTreeBuilder
 IKDTreeBuilder <|.. BinnedSAHBuilder

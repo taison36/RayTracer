@@ -29,10 +29,10 @@ namespace rt::gfx {
             AABB     bounds;
         };
 
-        static constexpr uint32_t MAX_LEAF_TRIS = 16;
-        static constexpr uint32_t NUM_BINS       = 33;
-        static constexpr uint32_t MAX_DEPTH      = 20;
-        static constexpr float    C_TRAV         = 1.5f;
+        constexpr uint32_t MAX_LEAF_TRIS = 16;
+        constexpr uint32_t NUM_BINS      = 33;
+        constexpr uint32_t MAX_DEPTH     = 20;
+        constexpr float    C_TRAV        = 1.5f;
 
         AABB triAABB(uint32_t idx,
                      const std::vector<rt::Triangle>& tris,

@@ -1,8 +1,7 @@
 #pragma once
-#include <cstdint>
+
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include"VkCore.h"
-#include "../../objects/UtilObjects.h"
 #include <vulkan/vulkan_raii.hpp>
 
 namespace rt::gfx {

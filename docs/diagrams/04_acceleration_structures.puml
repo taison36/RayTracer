@@ -52,27 +52,13 @@ class BruteForce {
 class BVH {
     - bvhNodes      : Buffer
     - bvhTriIndices : Buffer
+    - builder       : unique_ptr<IBVHBuilder>
     --
-    - buildBVH() : BVHNode[]
     + build(...)
     + record(...)
-    + getTypeName() : "BVH"
+    + getTypeName() : builder->getName()
     --
-    Midpoint-split hierarchy.
-    Fast build, moderate quality.
-}
-
-class SAHBVH {
-    - bvhNodes      : Buffer
-    - bvhTriIndices : Buffer
-    --
-    - buildBVH() : BVHNode[]
-    + build(...)
-    + record(...)
-    + getTypeName() : "SAH-BVH"
-    --
-    Surface Area Heuristic splits.
-    Better tree quality than midpoint.
+    Builder algorithm is pluggable.
 }
 
 class KDTree {
@@ -108,7 +94,12 @@ package "GPU Node Formats" {
     }
 }
 
-' ── KD-Tree builder stub ────────────────
+' ── Builder interfaces ──────────────────
+interface IBVHBuilder <<see 05_bvh>> {
+    + {abstract} build(triangles, vertices,\n               outNodes, outTriIndices)
+    + {abstract} getName() : string
+}
+
 interface IKDTreeBuilder <<see 06_kdtree>> {
     + {abstract} build(triangles, vertices,\n               outNodes, outTriIndices)
     + {abstract} getName() : string
@@ -117,18 +108,16 @@ interface IKDTreeBuilder <<see 06_kdtree>> {
 ' ── Relationships ───────────────────────
 AccelerationStruct <|-- BruteForce
 AccelerationStruct <|-- BVH
-AccelerationStruct <|-- SAHBVH
 AccelerationStruct <|-- KDTree
 
 BruteForce ..> CommonBuffers : owns
-BVH         ..> CommonBuffers : owns
-SAHBVH      ..> CommonBuffers : owns
-KDTree      ..> CommonBuffers : owns
+BVH        ..> CommonBuffers : owns
+KDTree     ..> CommonBuffers : owns
 
 BVH    ..> BVHNode : uploads to GPU
-SAHBVH ..> BVHNode : uploads to GPU
 KDTree ..> KDNode  : uploads to GPU
 
+BVH    o-- IBVHBuilder    : strategy
 KDTree o-- IKDTreeBuilder : strategy
 
 @enduml

@@ -1,135 +1,12 @@
 #include "BVH.h"
 #include "../../../../utils/utils.h"
 #include "vulkan/vulkan.hpp"
-#include <algorithm>
-#include <bit>
-#include <cstdio>
-#include <limits>
 
 namespace rt::gfx {
-    // ── Midpoint-split BVH builder (CPU) ─────────────────────────────────────────
-    // Each node is split at the midpoint of the longest axis of its AABB.
-    // No SAH cost evaluation — always splits until leaf threshold is reached.
-
-    namespace {
-        struct AABB {
-            glm::vec3 min{ std::numeric_limits<float>::max()};
-            glm::vec3 max{-std::numeric_limits<float>::max()};
-
-            void expand(glm::vec3 p)   { min = glm::min(min, p); max = glm::max(max, p); }
-            void expand(const AABB& o) { min = glm::min(min, o.min); max = glm::max(max, o.max); }
-            glm::vec3 centroid() const { return 0.5f * (min + max); }
-        };
-
-        struct TriInfo {
-            AABB      bounds;
-            glm::vec3 centroid;
-        };
-
-        constexpr uint32_t MAX_LEAF_TRIS = 4;
-
-        AABB triAABB(uint32_t idx,
-                     const std::vector<rt::Triangle>& tris,
-                     const std::vector<rt::Vertex>&   verts) {
-            const auto& tri = tris[idx];
-            AABB b;
-            b.expand(glm::vec3(verts[tri.indices[0]].position));
-            b.expand(glm::vec3(verts[tri.indices[1]].position));
-            b.expand(glm::vec3(verts[tri.indices[2]].position));
-            return b;
-        }
-
-        void makeLeaf(BVHNode& node, const AABB& bounds, uint32_t first, uint32_t count) {
-            node.aabbMinLeft  = glm::vec4(bounds.min, std::bit_cast<float>(first));
-            node.aabbMaxCount = glm::vec4(bounds.max, std::bit_cast<float>(count));
-        }
-
-        void makeInternal(BVHNode& node, const AABB& bounds, uint32_t leftChild) {
-            node.aabbMinLeft  = glm::vec4(bounds.min, std::bit_cast<float>(leftChild));
-            node.aabbMaxCount = glm::vec4(bounds.max, std::bit_cast<float>(0u));
-        }
-
-        void buildNode(uint32_t nodeIdx,
-                       uint32_t first,
-                       uint32_t count,
-                       std::vector<BVHNode>&   nodes,
-                       std::vector<uint32_t>&  indices,
-                       const std::vector<TriInfo>& infos) {
-            // Compute node AABB.
-            AABB bounds;
-            for (uint32_t i = first; i < first + count; i++)
-                bounds.expand(infos[indices[i]].bounds);
-
-            if (count <= MAX_LEAF_TRIS) {
-                makeLeaf(nodes[nodeIdx], bounds, first, count);
-                return;
-            }
-
-            // Choose the longest axis of the centroid AABB.
-            AABB centBounds;
-            for (uint32_t i = first; i < first + count; i++)
-                centBounds.expand(infos[indices[i]].centroid);
-
-            glm::vec3 extent = centBounds.max - centBounds.min;
-            int axis = 0;
-            if (extent.y > extent.x) axis = 1;
-            if (extent.z > extent[axis]) axis = 2;
-
-            // Median split: guaranteed balanced tree, O(log n) depth.
-            uint32_t mid = first + count / 2;
-            std::nth_element(indices.begin() + first,
-                             indices.begin() + mid,
-                             indices.begin() + first + count,
-                             [&](uint32_t a, uint32_t b) {
-                                 return infos[a].centroid[axis] < infos[b].centroid[axis];
-                             });
-
-            // Allocate adjacent child pair BEFORE writing the internal node
-            // (emplace_back may reallocate, invalidating a reference to nodes[nodeIdx]).
-            uint32_t leftIdx = static_cast<uint32_t>(nodes.size());
-            nodes.emplace_back();
-            nodes.emplace_back();
-
-            makeInternal(nodes[nodeIdx], bounds, leftIdx);
-
-            buildNode(leftIdx,     first, mid - first,         nodes, indices, infos);
-            buildNode(leftIdx + 1, mid,   first + count - mid, nodes, indices, infos);
-        }
-    } // anonymous namespace
-
-    void BVH::buildBVH(const std::vector<rt::Triangle>& tris,
-                       const std::vector<rt::Vertex>&   verts) {
-        uint32_t n = static_cast<uint32_t>(tris.size());
-
-        if (n == 0) {
-            BVHNode dummy{};
-            float big = std::numeric_limits<float>::max();
-            dummy.aabbMinLeft  = glm::vec4(big, big, big,   std::bit_cast<float>(0u));
-            dummy.aabbMaxCount = glm::vec4(-big, -big, -big, std::bit_cast<float>(1u));
-            bvhNodeData.push_back(dummy);
-            bvhTriIndexData.clear();
-            return;
-        }
-
-        std::vector<TriInfo> infos(n);
-        bvhTriIndexData.resize(n);
-        for (uint32_t i = 0; i < n; i++) {
-            bvhTriIndexData[i]  = i;
-            infos[i].bounds     = triAABB(i, tris, verts);
-            infos[i].centroid   = infos[i].bounds.centroid();
-        }
-
-        bvhNodeData.reserve(2 * n);
-        bvhNodeData.emplace_back(); // root = index 0
-
-        buildNode(0, 0, n, bvhNodeData, bvhTriIndexData, infos);
-        printf("BVH [Midpoint]: %zu nodes, %zu tri refs, 1.00x duplication\n",
-               bvhNodeData.size(), bvhTriIndexData.size());
-    }
 
     void BVH::build(const VkCore& vkCore, const RendererContext& context, const OutputImage& outputImage) {
         sceneSettings = extractSceneSettings(context);
-        buildBVH(context.scene->triangles, context.scene->vertices);
+        builder->build(context.scene->triangles, context.scene->vertices, bvhNodeData, bvhTriIndexData);
         createBuffers(vkCore, context);
         fillBuffers(vkCore, context);
         fillTextures(vkCore, context);
@@ -161,13 +38,13 @@ namespace rt::gfx {
             .position    = context.scene->camera.getPosition()
         };
         return BvhSceneSettings{
-            .cameraData            = cameraData,
-            .vertexCount           = static_cast<uint32_t>(context.scene->vertices.size()),
-            .triangleCount         = static_cast<uint32_t>(context.scene->triangles.size()),
-            .emissiveLightCount    = static_cast<uint32_t>(context.scene->emissiveLight.size()),
-            .directionalLightCount = static_cast<uint32_t>(context.scene->directionalLight.size()),
-            .pointLightCount       = static_cast<uint32_t>(context.scene->pointLight.size()),
-            .spotLightCount        = static_cast<uint32_t>(context.scene->spotLight.size()),
+            .cameraData              = cameraData,
+            .vertexCount             = static_cast<uint32_t>(context.scene->vertices.size()),
+            .triangleCount           = static_cast<uint32_t>(context.scene->triangles.size()),
+            .emissiveLightCount      = static_cast<uint32_t>(context.scene->emissiveLight.size()),
+            .directionalLightCount   = static_cast<uint32_t>(context.scene->directionalLight.size()),
+            .pointLightCount         = static_cast<uint32_t>(context.scene->pointLight.size()),
+            .spotLightCount          = static_cast<uint32_t>(context.scene->spotLight.size()),
             .maxBounces              = context.screenSettings->maxBounces,
             .samplesPerPixel         = context.screenSettings->samplesPerPixel,
             .samplesPerEmissiveLight = context.screenSettings->samplesPerEmissiveLight
@@ -193,14 +70,13 @@ namespace rt::gfx {
         textureImage.image = vk::raii::Image(vkCore.getDevice(), imageInfo);
 
         auto memReq = textureImage.image.getMemoryRequirements();
-        vk::MemoryAllocateInfo memInfo{
+        textureImage.memory = vk::raii::DeviceMemory(vkCore.getDevice(), vk::MemoryAllocateInfo{
             .allocationSize  = memReq.size,
             .memoryTypeIndex = vkCore.findMemoryType(memReq.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
-        };
-        textureImage.memory = vk::raii::DeviceMemory(vkCore.getDevice(), memInfo);
+        });
         textureImage.image.bindMemory(*textureImage.memory, 0);
 
-        vk::ImageViewCreateInfo viewInfo{
+        textureImage.view = vk::raii::ImageView(vkCore.getDevice(), vk::ImageViewCreateInfo{
             .image                           = *textureImage.image,
             .viewType                        = vk::ImageViewType::e2D,
             .format                          = vk::Format::eR8G8B8A8Srgb,
@@ -209,8 +85,7 @@ namespace rt::gfx {
             .subresourceRange.levelCount     = 1,
             .subresourceRange.baseArrayLayer = 0,
             .subresourceRange.layerCount     = 1
-        };
-        textureImage.view = vk::raii::ImageView(vkCore.getDevice(), viewInfo);
+        });
 
         vk::SamplerCreateInfo samplerInfo{};
         switch (texture.magFilter) {
@@ -226,14 +101,14 @@ namespace rt::gfx {
             case Filter::LINEAR:  samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;  break;
         }
         switch (texture.wrapU) {
-            case WrapMode::CLAMP_TO_EDGE:    samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;    break;
-            case WrapMode::REPEAT:           samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;         break;
-            case WrapMode::MIRRORED_REPEAT:  samplerInfo.addressModeU = vk::SamplerAddressMode::eMirroredRepeat; break;
+            case WrapMode::CLAMP_TO_EDGE:   samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;    break;
+            case WrapMode::REPEAT:          samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;         break;
+            case WrapMode::MIRRORED_REPEAT: samplerInfo.addressModeU = vk::SamplerAddressMode::eMirroredRepeat; break;
         }
         switch (texture.wrapV) {
-            case WrapMode::CLAMP_TO_EDGE:    samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;    break;
-            case WrapMode::REPEAT:           samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;         break;
-            case WrapMode::MIRRORED_REPEAT:  samplerInfo.addressModeV = vk::SamplerAddressMode::eMirroredRepeat; break;
+            case WrapMode::CLAMP_TO_EDGE:   samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;    break;
+            case WrapMode::REPEAT:          samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;         break;
+            case WrapMode::MIRRORED_REPEAT: samplerInfo.addressModeV = vk::SamplerAddressMode::eMirroredRepeat; break;
         }
         vk::PhysicalDeviceProperties props = vkCore.getPhysicalDevice().getProperties();
         samplerInfo.anisotropyEnable = vk::True;
@@ -254,7 +129,6 @@ namespace rt::gfx {
         constexpr auto kStorage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst;
         constexpr auto kUniform = vk::BufferUsageFlagBits::eUniformBuffer  | vk::BufferUsageFlagBits::eTransferDst;
         constexpr auto kDev     = vk::MemoryPropertyFlagBits::eDeviceLocal;
-
         auto sz = [](auto& v, size_t elem) { return std::max(v.size() * elem, elem); };
 
         const auto& s = *context.scene;
@@ -271,7 +145,7 @@ namespace rt::gfx {
         vkCore.createBuffer(accumSize, vk::BufferUsageFlagBits::eStorageBuffer, kDev,
                             accumBuffer.buffer, accumBuffer.memory);
 
-        mkBuf(std::max(bvhNodeData.size()     * sizeof(BVHNode),   sizeof(BVHNode)),   kStorage, kDev, bvhNodes);
+        mkBuf(std::max(bvhNodeData.size()     * sizeof(BVHNode),  sizeof(BVHNode)),  kStorage, kDev, bvhNodes);
         mkBuf(std::max(bvhTriIndexData.size() * sizeof(uint32_t), sizeof(uint32_t)), kStorage, kDev, bvhTriIndices);
     }
 
@@ -361,26 +235,24 @@ namespace rt::gfx {
             vkCore.transitionImageLayout(t.image,
                                          vk::ImageLayout::eTransferDstOptimal,
                                          vk::ImageLayout::eShaderReadOnlyOptimal, *cmd);
-
         vkCore.endSingleTimeCommands(*cmd);
     }
 
     void BVH::createDescriptorPool(const VkCore& vkCore, const RendererContext& context) {
         (void)context;
         std::vector<vk::DescriptorPoolSize> poolSizes = {
-            vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage,        1),
+            vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage,         1),
             vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer,       10),
-            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer,       1),
+            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer,        1),
             vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_TEXTURE_NUMBER)
         };
-        vk::DescriptorPoolCreateInfo poolInfo{
+        descriptorPool = vk::raii::DescriptorPool(vkCore.getDevice(), vk::DescriptorPoolCreateInfo{
             .flags         = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet |
                              vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind,
             .maxSets       = 1,
             .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
             .pPoolSizes    = poolSizes.data()
-        };
-        descriptorPool = vk::raii::DescriptorPool(vkCore.getDevice(), poolInfo);
+        });
     }
 
     void BVH::createDescriptorLayouts(const VkCore& vkCore, const RendererContext& context,
@@ -391,19 +263,19 @@ namespace rt::gfx {
         using S = vk::ShaderStageFlagBits;
 
         std::vector<B> bindings = {
-            B{.binding=0,  .descriptorType=T::eStorageImage,        .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=1,  .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=2,  .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=3,  .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=4,  .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=5,  .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=6,  .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=7,  .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=8,  .descriptorType=T::eUniformBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=9,  .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=10, .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=11, .descriptorType=T::eStorageBuffer,       .descriptorCount=1,                  .stageFlags=S::eCompute},
-            B{.binding=12, .descriptorType=T::eCombinedImageSampler,.descriptorCount=MAX_TEXTURE_NUMBER, .stageFlags=S::eCompute},
+            B{.binding=0,  .descriptorType=T::eStorageImage,         .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=1,  .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=2,  .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=3,  .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=4,  .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=5,  .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=6,  .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=7,  .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=8,  .descriptorType=T::eUniformBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=9,  .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=10, .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=11, .descriptorType=T::eStorageBuffer,        .descriptorCount=1,                  .stageFlags=S::eCompute},
+            B{.binding=12, .descriptorType=T::eCombinedImageSampler, .descriptorCount=MAX_TEXTURE_NUMBER, .stageFlags=S::eCompute},
         };
 
         std::vector<vk::DescriptorBindingFlags> flags(bindings.size());
@@ -415,26 +287,24 @@ namespace rt::gfx {
             .pBindingFlags = flags.data(),
             .bindingCount  = static_cast<uint32_t>(flags.size())
         };
-        vk::DescriptorSetLayoutCreateInfo layoutInfo{
+        descriptorSetLayout = vk::raii::DescriptorSetLayout(vkCore.getDevice(), vk::DescriptorSetLayoutCreateInfo{
             .pNext        = &flagsInfo,
             .flags        = vk::DescriptorSetLayoutCreateFlagBits::eUpdateAfterBindPool,
             .bindingCount = static_cast<uint32_t>(bindings.size()),
             .pBindings    = bindings.data()
-        };
-        descriptorSetLayout = vk::raii::DescriptorSetLayout(vkCore.getDevice(), layoutInfo);
+        });
 
         uint32_t texCount = static_cast<uint32_t>(context.scene->textures.size());
         vk::DescriptorSetVariableDescriptorCountAllocateInfo varCount{
             .descriptorSetCount = 1,
             .pDescriptorCounts  = &texCount
         };
-        vk::DescriptorSetAllocateInfo allocInfo{
+        descriptorSets = vkCore.getDevice().allocateDescriptorSets(vk::DescriptorSetAllocateInfo{
             .pNext              = &varCount,
             .descriptorPool     = descriptorPool,
             .descriptorSetCount = 1,
             .pSetLayouts        = &*descriptorSetLayout
-        };
-        descriptorSets = vkCore.getDevice().allocateDescriptorSets(allocInfo);
+        });
     }
 
     void BVH::writeStaticDescriptorSets(const VkCore& vkCore, const RendererContext& context,
@@ -470,7 +340,7 @@ namespace rt::gfx {
             };
         };
 
-        const std::vector writes{
+        vkCore.getDevice().updateDescriptorSets(std::vector<vk::WriteDescriptorSet>{
             vk::WriteDescriptorSet{
                 .dstSet=ds, .dstBinding=0, .dstArrayElement=0, .descriptorCount=1,
                 .descriptorType=vk::DescriptorType::eStorageImage, .pImageInfo=&imageInfo
@@ -486,8 +356,7 @@ namespace rt::gfx {
             w(9,  vk::DescriptorType::eStorageBuffer, &aBI),
             w(10, vk::DescriptorType::eStorageBuffer, &nBI),
             w(11, vk::DescriptorType::eStorageBuffer, &iBI),
-        };
-        vkCore.getDevice().updateDescriptorSets(writes, {});
+        }, {});
     }
 
     void BVH::writeBindlessDescriptorSets(const VkCore& vkCore, const RendererContext& context) const {
@@ -503,38 +372,34 @@ namespace rt::gfx {
         }
         if (texInfos.empty()) return;
 
-        vk::WriteDescriptorSet write{
+        vkCore.getDevice().updateDescriptorSets(vk::WriteDescriptorSet{
             .dstSet          = descriptorSets.front(),
             .dstBinding      = 12,
             .dstArrayElement = 0,
             .descriptorCount = static_cast<uint32_t>(texInfos.size()),
             .descriptorType  = vk::DescriptorType::eCombinedImageSampler,
             .pImageInfo      = texInfos.data()
-        };
-        vkCore.getDevice().updateDescriptorSets(write, {});
+        }, {});
     }
 
     void BVH::createPipeline(const VkCore& vkCore) {
         const vk::raii::ShaderModule shaderModule = vkCore.createShaderModule(readFile("shaders/bvh.spv"));
-        vk::PipelineShaderStageCreateInfo stageInfo{
-            .stage  = vk::ShaderStageFlagBits::eCompute,
-            .module = shaderModule,
-            .pName  = "computeMain"
-        };
         vk::PushConstantRange pushRange{
             .stageFlags = vk::ShaderStageFlagBits::eCompute,
             .offset     = 0,
             .size       = 3 * sizeof(uint32_t)
         };
-        vk::PipelineLayoutCreateInfo layoutInfo{
+        pipelineLayout = vk::raii::PipelineLayout(vkCore.getDevice(), vk::PipelineLayoutCreateInfo{
             .setLayoutCount         = 1,
             .pSetLayouts            = &*descriptorSetLayout,
             .pushConstantRangeCount = 1,
             .pPushConstantRanges    = &pushRange
-        };
-        pipelineLayout = vk::raii::PipelineLayout(vkCore.getDevice(), layoutInfo);
-
-        vk::ComputePipelineCreateInfo pipelineInfo{.stage=stageInfo, .layout=*pipelineLayout};
-        pipeline = vk::raii::Pipeline(vkCore.getDevice().createComputePipeline(nullptr, pipelineInfo));
+        });
+        pipeline = vk::raii::Pipeline(vkCore.getDevice().createComputePipeline(nullptr,
+            vk::ComputePipelineCreateInfo{
+                .stage  = {.stage=vk::ShaderStageFlagBits::eCompute, .module=shaderModule, .pName="computeMain"},
+                .layout = *pipelineLayout
+            }));
     }
+
 } // rt::gfx

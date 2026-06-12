@@ -1,0 +1,44 @@
+@startuml 08_pipeline
+left to right direction
+skinparam ArrowColor #555555
+skinparam RectangleBorderColor #444444
+skinparam RectangleBackgroundColor #FAFAFA
+skinparam PackageBorderColor #888888
+skinparam PackageBackgroundColor transparent
+
+title Rendering-Pipeline — CPU/GPU Ablauf
+
+package "CPU" #EEF3FA {
+  rectangle "Programmstart"              as A1
+  rectangle "Szene laden"                as A2
+  rectangle "Beschleunigungs-\nstruktur bauen" as A3
+  rectangle "Szenendaten\nhochladen"     as A4
+  rectangle "Befehle aufnehmen"          as A5
+  rectangle "Submit + Warten"            as A6
+  rectangle "OutputImage laden"          as A7
+  rectangle "PPM schreiben"              as A8
+}
+
+package "GPU (pro Pixel)" #F5EEF8 {
+  rectangle "Compute\ndispatchen"        as G1
+  rectangle "Primärstrahl\nerzeugen"     as G2
+  rectangle "AS\ntraversieren"           as G3
+  rectangle "Material +\nBeleuchtung +\nStreuung" as G4
+  rectangle "Sample\nakkumulieren"       as G5
+}
+
+A1 --> A2
+A2 --> A3
+A3 --> A4
+A4 --> A5
+A5 --> G1
+G1 --> G2
+G2 --> G3
+G3 --> G4
+G4 --> G3 : weiter bouncen
+G4 --> G5 : fertig
+G5 --> A6
+A6 --> A7
+A7 --> A8
+
+@enduml

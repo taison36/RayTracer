@@ -1,4 +1,4 @@
-@startuml 03_rendering
+t @startuml 03_rendering
 skinparam linetype ortho
 skinparam classAttributeIconSize 0
 skinparam packageStyle rectangle

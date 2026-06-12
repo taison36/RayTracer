@@ -299,6 +299,17 @@ bool intersectAABB(Ray ray, float3 bmin, float3 bmax, float tMax) {
     return tNear <= tFar && tFar > 0.0 && tNear < tMax;
 }
 
+// AABB slab test returning the [tNear, tFar] interval, for ordered traversal.
+bool intersectAABBInterval(Ray ray, float3 bmin, float3 bmax,
+                           out float tNear, out float tFar) {
+    float3 invDir = 1.0 / ray.direction;
+    float3 t0     = (bmin - ray.origin) * invDir;
+    float3 t1     = (bmax - ray.origin) * invDir;
+    tNear = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+    tFar  = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+    return tNear <= tFar && tFar > 0.0;
+}
+
 // Fill HitInfo after a confirmed triangle hit.
 void resolveHit(uint triIdx, float t, float2 bary, Ray ray, inout HitInfo hit) {
     Triangle tri = triangles[triIdx];
@@ -334,25 +345,32 @@ void resolveHit(uint triIdx, float t, float2 bary, Ray ray, inout HitInfo hit) {
     }
 }
 
+// Ordered closest-hit traversal. Both children of an interior node are
+// AABB-tested at push time; the closer child is pushed last so it is popped
+// first, letting hit.t shrink before the far subtree is opened.
 HitInfo traceScene(inout Ray ray) {
     HitInfo hit;
     hit.hit = false;
     hit.t   = 1e10;
 
     uint stack[64];
-    int  top  = 0;
-    stack[0]  = 0; // root
+    int  top = -1;
+
+    // Test the root once; only descend if the ray hits the scene AABB.
+    BVHNode root = bvhNodes[0];
+    float tRootNear, tRootFar;
+    if (!intersectAABBInterval(ray, root.aabbMinLeft.xyz, root.aabbMaxCount.xyz,
+                               tRootNear, tRootFar))
+        return hit;
+    stack[++top] = 0u;
 
     while (top >= 0) {
-        BVHNode node     = bvhNodes[stack[top--]];
+        BVHNode node      = bvhNodes[stack[top--]];
         uint    leftFirst = asuint(node.aabbMinLeft.w);
         uint    triCount  = asuint(node.aabbMaxCount.w);
 
-        if (!intersectAABB(ray, node.aabbMinLeft.xyz, node.aabbMaxCount.xyz, hit.t))
-            continue;
-
         if (triCount > 0u) {
-            // Leaf: test every primitive
+            // Leaf: test every primitive.
             for (uint i = 0u; i < triCount; i++) {
                 uint   triIdx = bvhTriIndices[leftFirst + i];
                 float  t;
@@ -361,10 +379,33 @@ HitInfo traceScene(inout Ray ray) {
                     resolveHit(triIdx, t, bary, ray, hit);
             }
         } else {
-            // Internal: push both children (right child = leftFirst + 1)
-            if (top < 62) {
-                stack[++top] = leftFirst;
-                stack[++top] = leftFirst + 1u;
+            // Interior: AABB-test both children, push only those that survive,
+            // closer child last so it is popped first.
+            uint    leftIdx  = leftFirst;
+            uint    rightIdx = leftFirst + 1u;
+            BVHNode L        = bvhNodes[leftIdx];
+            BVHNode R        = bvhNodes[rightIdx];
+
+            float tNearL, tFarL, tNearR, tFarR;
+            bool hitL = intersectAABBInterval(ray, L.aabbMinLeft.xyz, L.aabbMaxCount.xyz, tNearL, tFarL)
+                     && tNearL < hit.t;
+            bool hitR = intersectAABBInterval(ray, R.aabbMinLeft.xyz, R.aabbMaxCount.xyz, tNearR, tFarR)
+                     && tNearR < hit.t;
+
+            if (hitL && hitR) {
+                if (top < 62) {
+                    if (tNearL <= tNearR) {
+                        stack[++top] = rightIdx; // far
+                        stack[++top] = leftIdx;  // near (popped first)
+                    } else {
+                        stack[++top] = leftIdx;
+                        stack[++top] = rightIdx;
+                    }
+                }
+            } else if (hitL && top < 63) {
+                stack[++top] = leftIdx;
+            } else if (hitR && top < 63) {
+                stack[++top] = rightIdx;
             }
         }
     }
@@ -466,35 +507,42 @@ float3 sampleEmissiveTriangle(uint listIdx, inout RNG rng, out float3 lightNorma
     return v0.position.xyz * w + v1.position.xyz * r1 + v2.position.xyz * r2;
 }
 
-// Direct light sampling (NEE) contribution at a diffuse hit point
+// Direct light sampling (NEE) contribution at a diffuse hit point.
+// Takes scene.samplesPerEmissiveLight shadow-ray samples and averages them
+// to reduce variance on area-lit surfaces.
 float3 estimateDirect(HitInfo hit, Material mat, inout RNG rng) {
-    uint  lightIdx = min(uint(rng_next(rng) * float(scene.emissiveLightCount)), scene.emissiveLightCount - 1);
+    float3 total = float3(0.0, 0.0, 0.0);
 
-    float3 lightNormal;
-    float  area;
-    float3 lightPos = sampleEmissiveTriangle(lightIdx, rng, lightNormal, area);
+    for (uint s = 0; s < scene.samplesPerEmissiveLight; s++) {
+        uint lightIdx = min(uint(rng_next(rng) * float(scene.emissiveLightCount)),
+                            scene.emissiveLightCount - 1);
 
-    float3 toLight    = lightPos - hit.position;
-    float  dist       = length(toLight);
-    float3 toLightDir = toLight / dist;
+        float3 lightNormal;
+        float  area;
+        float3 lightPos = sampleEmissiveTriangle(lightIdx, rng, lightNormal, area);
 
-    float cosTheta      = dot(hit.normal,   toLightDir);
-    float cosThetaLight = abs(dot(lightNormal, toLightDir));
+        float3 toLight    = lightPos - hit.position;
+        float  dist       = length(toLight);
+        float3 toLightDir = toLight / dist;
 
-    if (cosTheta <= 0.0)
-        return float3(0.0, 0.0, 0.0);
+        float cosTheta      = dot(hit.normal,   toLightDir);
+        float cosThetaLight = abs(dot(lightNormal, toLightDir));
 
-    uint   lightTriIdx  = emissiveLight[lightIdx];
-    float3 shadowOrigin = hit.position + hit.normal * 1e-4;
-    if (isOccluded(shadowOrigin, toLightDir, dist, lightTriIdx))
-        return float3(0.0, 0.0, 0.0);
+        if (cosTheta <= 0.0) continue;
 
-    Material lightMat = materials[triangles[lightTriIdx].material];
-    float3   Le       = lightMat.emissiveFactor.rgb;
-    float3   albedo   = getBaseColor(mat, hit).xyz;
-    float    pdf      = (dist * dist) / (area * cosThetaLight * float(scene.emissiveLightCount));
+        uint   lightTriIdx  = emissiveLight[lightIdx];
+        float3 shadowOrigin = hit.position + hit.normal * 1e-4;
+        if (isOccluded(shadowOrigin, toLightDir, dist, lightTriIdx)) continue;
 
-    return Le * (albedo / PI) * cosTheta / pdf;
+        Material lightMat = materials[triangles[lightTriIdx].material];
+        float3   Le       = lightMat.emissiveFactor.rgb;
+        float3   albedo   = getBaseColor(mat, hit).xyz;
+        float    pdf      = (dist * dist) / (area * cosThetaLight * float(scene.emissiveLightCount));
+
+        total += Le * (albedo / PI) * cosTheta / pdf;
+    }
+
+    return total / float(scene.samplesPerEmissiveLight);
 }
 
 float4 ray_color(Ray r, inout RNG rng) {
