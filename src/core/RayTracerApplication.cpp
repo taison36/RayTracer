@@ -10,11 +10,13 @@
 namespace rt {
     RayTracerApplication::RayTracerApplication(const std::string &scenePath,
                                                std::unique_ptr<gfx::AccelerationStruct> accelStruct,
-                                               std::unique_ptr<SceneSettings> sceneSettings)
+                                               std::unique_ptr<SceneSettings> sceneSettings,
+                                               const std::string& outputFileName)
         : screenSettings(std::move(sceneSettings)),
           buffer(std::make_unique<FrameBuffer>(screenSettings->WIDTH, screenSettings->HEIGHT)),
           renderer(std::make_unique<gfx::Renderer>(std::move(accelStruct))),
-          scene(std::make_unique<Scene>(SceneLoader::loadScene(scenePath))) {
+          scene(std::make_unique<Scene>(SceneLoader::loadScene(scenePath))),
+          outputFileName(outputFileName) {
     }
 
     void RayTracerApplication::run() {
@@ -28,7 +30,7 @@ namespace rt {
                      std::chrono::duration_cast<std::chrono::milliseconds>(
                          std::chrono::high_resolution_clock::now() - start).count());
 
-        save_as_ppm("checker.ppm");
+        save_as_ppm(outputFileName.c_str());
     }
 
     void RayTracerApplication::save_as_ppm(const char *filename) {

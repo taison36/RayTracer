@@ -16,9 +16,8 @@ set(Raytracer_SRC
         render/gpu/accelerationStructures/kdtree/KDTree.cpp
         render/gpu/accelerationStructures/kdtree/builder/BinnedSHABuilder.cpp
         render/gpu/accelerationStructures/kdtree/builder/ExactSAHBuilder.cpp
-        render/gpu/accelerationStructures/kdtree/builder/ExactSAHBuilderNoESC.cpp
 
-    utils/SceneLoader.cpp
+        utils/SceneLoader.cpp
     utils/utils.cpp
 )
 

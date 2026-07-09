@@ -423,7 +423,7 @@ float3 estimateDirect(HitInfo hit, Material mat, inout RNG rng) {
     if (isOccluded(shadowOrigin, toLightDir, dist, lightTriIdx))
         return float3(0.0, 0.0, 0.0);
     Material lightMat    = materials[triangles[lightTriIdx].material];
-    float3   Le          = lightMat.emissiveFactor.rgb;
+    float3   Le          = lightMat.emissiveFactor.rgb * lightMat.emissiveFactor.w;
 
     // Lambertian BRDF = albedo / PI
     float3 albedo = getBaseColor(mat, hit).xyz;
@@ -452,7 +452,7 @@ float4 ray_color(Ray r, inout RNG rng) {
         }
 
         Material mat          = materials[hit.materialIndex];
-        float3   emittedColor = mat.emissiveFactor.rgb;
+        float3   emittedColor = mat.emissiveFactor.rgb * mat.emissiveFactor.w;
 
         // Add emission only on camera/specular hits to avoid double-counting with NEE
         if (specularBounce)

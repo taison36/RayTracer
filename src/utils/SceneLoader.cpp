@@ -471,11 +471,17 @@ namespace rt {
     Material convertMaterial(const tinygltf::Material &tm) {
         Material material;
 
+        float emissiveStrength = 1.0f;
+        if (const auto it = tm.extensions.find("KHR_materials_emissive_strength");
+            it != tm.extensions.end() && it->second.Has("emissiveStrength")) {
+            emissiveStrength = static_cast<float>(it->second.Get("emissiveStrength").GetNumberAsDouble());
+        }
+
         material.emissiveFactor = glm::vec4(
             static_cast<float>(tm.emissiveFactor[0]),
             static_cast<float>(tm.emissiveFactor[1]),
             static_cast<float>(tm.emissiveFactor[2]),
-            0.0f
+            emissiveStrength
         );
 
         const auto &pbr = tm.pbrMetallicRoughness;
@@ -608,6 +614,9 @@ namespace rt {
     }
 
     bool hasEmissiveLight(const Triangle& triangle, const std::vector<Material>& materials) {
+        if (triangle.material >= materials.size()) {
+            return false;
+        }
         const auto& mat = materials[triangle.material];
         return mat.emissiveFactor.x > 0 ||
                mat.emissiveFactor.y > 0 ||
