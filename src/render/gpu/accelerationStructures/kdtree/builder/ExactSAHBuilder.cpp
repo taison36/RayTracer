@@ -20,7 +20,7 @@ namespace rt::gfx {
     namespace {
 
         static constexpr uint32_t MAX_LEAF_TRIS = 16;
-        static constexpr uint32_t MAX_DEPTH     = 40; // ESC cuts consume depth; 40 leaves room for both
+        static constexpr uint32_t MAX_DEPTH     = 50; // ESC cuts consume depth; 40 leaves room for both
         static constexpr float    C_TRAV        = 1.5f;
         static constexpr float    C_ISECT       = 1.0f;
 

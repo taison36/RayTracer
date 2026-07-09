@@ -535,7 +535,7 @@ float3 estimateDirect(HitInfo hit, Material mat, inout RNG rng) {
         if (isOccluded(shadowOrigin, toLightDir, dist, lightTriIdx)) continue;
 
         Material lightMat = materials[triangles[lightTriIdx].material];
-        float3   Le       = lightMat.emissiveFactor.rgb;
+        float3   Le       = lightMat.emissiveFactor.rgb * lightMat.emissiveFactor.w;
         float3   albedo   = getBaseColor(mat, hit).xyz;
         float    pdf      = (dist * dist) / (area * cosThetaLight * float(scene.emissiveLightCount));
 
@@ -559,7 +559,7 @@ float4 ray_color(Ray r, inout RNG rng) {
         }
 
         Material mat          = materials[hit.materialIndex];
-        float3   emittedColor = mat.emissiveFactor.rgb;
+        float3   emittedColor = mat.emissiveFactor.rgb * mat.emissiveFactor.w;
 
         if (specularBounce)
             pixelColor += throughput * emittedColor;
